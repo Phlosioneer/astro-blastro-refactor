@@ -1,0 +1,10 @@
+[package]
+name = "cavern-carvers"
+version = "0.1.0"
+authors = ["Phlosioneer <mattmdrr2@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+ggez = "0.4"
+recs = "2.0"
+rand = "0.5"
