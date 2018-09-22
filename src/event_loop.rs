@@ -1,34 +1,22 @@
-
-use ggez::timer;
 use ggez::event::{EventHandler, Keycode, Mod};
 use ggez::graphics::{self, Point2, Vector2};
+use ggez::timer;
 use ggez::{Context, GameResult};
 
-use recs::{Ecs, EntityId};
+use super::better_ecs::{Ecs, EntityId};
 
 use super::ActorType;
 
 use super::{
-    InputState, 
-    Assets, 
-    print_instructions, 
-    create_player, 
-    create_rocks,
-    create_shot,
-    vec_from_angle,
-    SHOT_SPEED,
-    PLAYER_SHOT_TIME,
-    player_handle_input,
-    update_actor_position,
-    wrap_actor_position,
-    handle_shot_timer,
-    draw_actor
+    create_player, create_rocks, create_shot, draw_actor, handle_shot_timer, player_handle_input,
+    print_instructions, update_actor_position, vec_from_angle, wrap_actor_position, Assets,
+    InputState, PLAYER_SHOT_TIME, SHOT_SPEED,
 };
 
 // Components.
 #[derive(Clone)]
 pub struct Tag {
-    pub tag: ActorType
+    pub tag: ActorType,
 }
 
 #[derive(Clone)]
@@ -40,22 +28,22 @@ pub struct Transform {
 #[derive(Clone)]
 pub struct Physics {
     pub velocity: Vector2,
-    pub ang_vel: f32
+    pub ang_vel: f32,
 }
 
 #[derive(Clone)]
 pub struct BoundingBox {
-    pub bbox_size: f32
+    pub bbox_size: f32,
 }
 
 #[derive(Clone)]
 pub struct Health {
-    pub health: f32
+    pub health: f32,
 }
 
 #[derive(Clone)]
 pub struct ShotLifetime {
-    pub time: f32
+    pub time: f32,
 }
 
 /// **********************************************************************
@@ -121,7 +109,7 @@ impl MainState {
             score_display: score_disp,
             level_display: level_disp,
 
-            system: entity_system
+            system: entity_system,
         };
 
         Ok(s)
@@ -129,7 +117,7 @@ impl MainState {
 
     pub fn fire_player_shot(&mut self) {
         self.player_shot_timeout = PLAYER_SHOT_TIME;
-        
+
         let shot = create_shot(&mut self.system);
 
         let player_transform: Transform = self.system.get(self.player).unwrap();
@@ -151,7 +139,7 @@ impl MainState {
         let mut rocks = Vec::with_capacity(0);
         std::mem::swap(&mut self.shots, &mut shots);
         std::mem::swap(&mut self.rocks, &mut rocks);
-        
+
         shots.retain(|&s| self.system.get::<ShotLifetime>(s).unwrap().time > 0.0);
         rocks.retain(|&r| self.system.get::<Health>(r).unwrap().health > 0.0);
 
@@ -168,7 +156,9 @@ impl MainState {
 
             let pdistance = rock_transform.pos - player_transform.pos;
             if pdistance.norm() < (player_bbox.bbox_size + rock_bbox.bbox_size) {
-                self.system.set(self.player, Health { health: 0.0 }).unwrap();
+                self.system
+                    .set(self.player, Health { health: 0.0 })
+                    .unwrap();
             }
             for &shot in &self.shots {
                 let shot_transform: Transform = self.system.get(shot).unwrap();
@@ -192,7 +182,13 @@ impl MainState {
 
             self.level += 1;
             self.gui_dirty = true;
-            let r = create_rocks(&mut self.system, self.level + 5, transform.pos, 100.0, 250.0);
+            let r = create_rocks(
+                &mut self.system,
+                self.level + 5,
+                transform.pos,
+                100.0,
+                250.0,
+            );
             self.rocks.extend(r);
         }
     }
@@ -207,7 +203,6 @@ impl MainState {
         self.level_display = level_text;
     }
 }
-
 
 /// **********************************************************************
 /// Now we implement the `EventHandler` trait from `ggez::event`, which provides
@@ -241,14 +236,24 @@ impl EventHandler for MainState {
             // Then the shots...
             for &act in &self.shots {
                 update_actor_position(&mut self.system, act, seconds);
-                wrap_actor_position(&mut self.system, act, self.screen_width as f32, self.screen_height as f32);
+                wrap_actor_position(
+                    &mut self.system,
+                    act,
+                    self.screen_width as f32,
+                    self.screen_height as f32,
+                );
                 handle_shot_timer(&mut self.system, act, seconds);
             }
 
             // And finally the rocks.
             for &act in &self.rocks {
                 update_actor_position(&mut self.system, act, seconds);
-                wrap_actor_position(&mut self.system, act, self.screen_width as f32, self.screen_height as f32);
+                wrap_actor_position(
+                    &mut self.system,
+                    act,
+                    self.screen_width as f32,
+                    self.screen_height as f32,
+                );
             }
 
             // Handle the results of things moving:

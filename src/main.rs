@@ -2,10 +2,9 @@
 //! The idea is that this game is simple but still
 //! non-trivial enough to be interesting.
 
-
 extern crate ggez;
 extern crate rand;
-extern crate recs;
+//extern crate recs;
 
 use ggez::audio;
 use ggez::conf;
@@ -15,15 +14,17 @@ use ggez::graphics::Point2;
 use ggez::nalgebra as na;
 use ggez::{Context, ContextBuilder, GameResult};
 
-use recs::{Ecs, EntityId};
+//use recs::{Ecs, EntityId};
 
 use std::env;
 use std::path;
 
+mod better_ecs;
 mod event_loop;
 mod vec;
+use self::better_ecs::{Ecs, EntityId};
 
-use self::event_loop::{MainState, Tag, Transform, Physics, BoundingBox, Health, ShotLifetime};
+use self::event_loop::{BoundingBox, Health, MainState, Physics, ShotLifetime, Tag, Transform};
 use self::vec::{random_vec, vec_from_angle};
 
 /// *********************************************************************
@@ -75,27 +76,47 @@ pub const MAX_ROCK_VEL: f32 = 50.0;
 
 pub fn create_player(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
-    system.set(actor, Tag {
-        tag: ActorType::Player,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Tag {
+                tag: ActorType::Player,
+            },
+        ).unwrap();
 
-    system.set(actor, Transform {
-        pos: Point2::origin(),
-        facing: 0.,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Transform {
+                pos: Point2::origin(),
+                facing: 0.,
+            },
+        ).unwrap();
 
-    system.set(actor, Physics {
-        velocity: na::zero(),
-        ang_vel: 0.,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Physics {
+                velocity: na::zero(),
+                ang_vel: 0.,
+            },
+        ).unwrap();
 
-    system.set(actor, BoundingBox {
-        bbox_size: PLAYER_BBOX,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            BoundingBox {
+                bbox_size: PLAYER_BBOX,
+            },
+        ).unwrap();
 
-    system.set(actor, Health {
-        health: PLAYER_LIFE,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Health {
+                health: PLAYER_LIFE,
+            },
+        ).unwrap();
 
     actor
 }
@@ -103,55 +124,83 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
 pub fn create_rock(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
 
-    system.set(actor, Tag {
-        tag: ActorType::Rock,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Tag {
+                tag: ActorType::Rock,
+            },
+        ).unwrap();
 
-    system.set(actor, Transform {
-        pos: Point2::origin(),
-        facing: 0.,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Transform {
+                pos: Point2::origin(),
+                facing: 0.,
+            },
+        ).unwrap();
 
-    system.set(actor, Physics {
-        velocity: na::zero(),
-        ang_vel: 0.,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Physics {
+                velocity: na::zero(),
+                ang_vel: 0.,
+            },
+        ).unwrap();
 
-    system.set(actor, BoundingBox {
-        bbox_size: ROCK_BBOX,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            BoundingBox {
+                bbox_size: ROCK_BBOX,
+            },
+        ).unwrap();
 
-    system.set(actor, Health {
-        health: ROCK_LIFE
-    }).unwrap();
+    system.set(actor, Health { health: ROCK_LIFE }).unwrap();
 
     actor
 }
 
 pub fn create_shot(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
-    
-    system.set(actor, Tag {
-        tag: ActorType::Shot,
-    }).unwrap();
 
-    system.set(actor, Transform {
-        pos: Point2::origin(),
-        facing: 0.,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Tag {
+                tag: ActorType::Shot,
+            },
+        ).unwrap();
 
-    system.set(actor, Physics {
-        velocity: na::zero(),
-        ang_vel: SHOT_ANG_VEL,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Transform {
+                pos: Point2::origin(),
+                facing: 0.,
+            },
+        ).unwrap();
 
-    system.set(actor, BoundingBox {
-        bbox_size: SHOT_BBOX,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            Physics {
+                velocity: na::zero(),
+                ang_vel: SHOT_ANG_VEL,
+            },
+        ).unwrap();
 
-    system.set(actor, ShotLifetime {
-        time: SHOT_LIFE,
-    }).unwrap();
+    system
+        .set(
+            actor,
+            BoundingBox {
+                bbox_size: SHOT_BBOX,
+            },
+        ).unwrap();
+
+    system.set(actor, ShotLifetime { time: SHOT_LIFE }).unwrap();
 
     actor
 }
@@ -162,13 +211,19 @@ pub fn create_shot(system: &mut Ecs) -> EntityId {
 /// Note that this *could* create rocks outside the
 /// bounds of the playing field, so it should be
 /// called before `wrap_actor_position()` happens.
-pub fn create_rocks(system: &mut Ecs, num: i32, exclusion: Point2, min_radius: f32, max_radius: f32) -> Vec<EntityId> {
+pub fn create_rocks(
+    system: &mut Ecs,
+    num: i32,
+    exclusion: Point2,
+    min_radius: f32,
+    max_radius: f32,
+) -> Vec<EntityId> {
     assert!(max_radius > min_radius);
     let new_rock = |_| {
         let rock = create_rock(system);
         let r_angle = rand::random::<f32>() * 2.0 * std::f32::consts::PI;
         let r_distance = rand::random::<f32>() * (max_radius - min_radius) + min_radius;
-        
+
         let transfrom: &mut Transform = system.borrow_mut(rock).unwrap();
         transfrom.pos = exclusion + vec_from_angle(r_angle) * r_distance;
 
@@ -244,7 +299,7 @@ pub fn update_actor_position(system: &mut Ecs, actor: EntityId, dt: f32) {
 /// will re-enter on the right side and so on.
 pub fn wrap_actor_position(system: &mut Ecs, actor: EntityId, sx: f32, sy: f32) {
     let transform: &mut Transform = system.borrow_mut(actor).unwrap();
-    
+
     // Wrap screen
     let screen_x_bounds = sx / 2.0;
     let screen_y_bounds = sy / 2.0;
@@ -343,8 +398,6 @@ impl Default for InputState {
     }
 }
 
-
-
 /// **********************************************************************
 /// A couple of utility functions.
 /// **********************************************************************
@@ -377,7 +430,6 @@ pub fn draw_actor(
     let image = assets.actor_image(system, actor);
     graphics::draw_ex(ctx, image, drawparams)
 }
-
 
 /// **********************************************************************
 /// Finally our main function!  Which merely sets up a config and calls

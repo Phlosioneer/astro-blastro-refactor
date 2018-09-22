@@ -1,6 +1,4 @@
-
 use ggez::graphics::Vector2;
-
 
 /// *********************************************************************
 /// Basic stuff, make some helpers for vector functions.
