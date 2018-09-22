@@ -90,23 +90,43 @@ impl Ecs {
         }
     }
 
+    pub fn has_entity(&self, entity: EntityId) -> bool {
+        self.entities.contains_key(&entity)
+    }
+
+    pub fn has_component<T: Component>(&self, entity: EntityId) -> Result<Option<ComponentId>, NotFound> {
+        self.entities.get(&entity)
+            .ok_or(NotFound::Entity(entity))
+            .map(|components| components.get(&TypeId::of::<T>())
+                .map(|&id| id))
+            
+    }
+
     pub fn set<T: Component>(
         &mut self,
         entity: EntityId,
         component: T,
     ) -> Result<ComponentId, NotFound> {
-        let component_id = self.create_component(component, entity);
-        let entity_components = match self.entities.get_mut(&entity) {
-            Some(v) => v,
-            None => {
-                self.remove_component(component_id).unwrap();
-                return Err(NotFound::Entity(entity));
+        
+        match self.has_component::<T>(entity) {
+            Err(e) => Err(e),
+            Ok(Some(component_id)) => {
+                // Update that component.
+                self.components.insert(component_id, (Box::new(component), entity)).unwrap();
+                Ok(component_id)
+            },
+            Ok(None) => {
+                let component_id = self.create_component(component, entity);
+                let entity_components = self.entities.get_mut(&entity).unwrap();
+
+                let maybe_old_id = entity_components.insert(TypeId::of::<T>(), component_id);
+                if let Some(old_id) = maybe_old_id {
+                    self.remove_component(old_id).unwrap();
+                }
+
+                Ok(component_id)
             }
-        };
-
-        entity_components.insert(TypeId::of::<T>(), component_id);
-
-        Ok(component_id)
+        }
     }
 
     pub fn borrow<T: Component>(&self, entity: EntityId) -> Result<&T, NotFound> {
@@ -228,5 +248,18 @@ mod test {
         assert!(ecs.get::<Position>(a) == Ok(Position(a_start + a_vel)));
         assert!(ecs.get::<Position>(b) == Ok(Position(b_start + b_vel)));
         assert!(ecs.get::<Position>(c) == Ok(Position(c_start)));
+    }
+
+    #[test]
+    fn test_set_wont_change_id() {
+        let mut ecs = Ecs::new();
+        let a = ecs.create_entity();
+        let id: ComponentId = ecs.set(a, Position(Vector2::new(0.0, 0.0))).unwrap();
+        let new_id = ecs.set(a, Position(Vector2::new(1.0, 1.0))).unwrap();
+
+        assert!(id == new_id, "Ecs::set changed the id of a component!");
+
+        let new_value: Position = ecs.get(a).unwrap();
+        assert!(new_value == Position(Vector2::new(1.0, 1.0)), "Ecs::set didn't update the component.");
     }
 }
