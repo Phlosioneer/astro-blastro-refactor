@@ -28,11 +28,27 @@ pub enum EcsError {
     InternalError(&'static str, Option<Box<EcsError>>)
 }
 
+struct ComponentEntry {
+    pub refbox: RefCell<Box<Any>>,
+    pub parent: EntityId,
+    pub type_id: TypeId
+}
+
+impl ComponentEntry {
+    pub fn new<T: Component>(component: T, parent: EntityId) -> Self {
+        ComponentEntry {
+            refbox: RefCell::new(Box::new(component)),
+            parent,
+            type_id: TypeId::of::<T>()
+        }
+    }
+}
+
 pub struct Ecs {
     next_entity_id: IdNumber,
     next_component_id: IdNumber,
     entities: HashMap<EntityId, ComponentMap>,
-    components: HashMap<ComponentId, (RefCell<Box<Any>>, EntityId)>,
+    components: HashMap<ComponentId, ComponentEntry>,
 }
 
 pub trait Component: 'static {}
@@ -70,7 +86,7 @@ impl Ecs {
         let new_id = ComponentId(new_id_number);
 
         self.components
-            .insert(new_id, (RefCell::new(Box::new(component)), parent));
+            .insert(new_id, ComponentEntry::new(component, parent));
 
         new_id
     }
@@ -176,7 +192,7 @@ impl Ecs {
 
     fn get_refcell(&self, id: ComponentId) -> Result<&RefCell<Box<Any>>, EcsError> {
         self.components.get(&id)
-            .map(|v| &v.0)
+            .map(|v| &v.refbox)
             .ok_or(EcsError::InternalError("Component attached to entity couldn't be found.", None))
     }
 
@@ -227,8 +243,88 @@ impl Ecs {
         dest.clear();
         dest.extend(self.entities.keys().cloned());
     }
+
+    /// Iterator over all components of a specific type.
+    pub fn components<'a, T: Component>(&'a self) -> impl Iterator<Item=ComponentId> + 'a {
+        self.components.iter()
+            // This filters out everything with the wrong type.
+            .filter(|(_, entry)| entry.type_id == TypeId::of::<T>())
+            
+            // This gives an iterator over component ids.
+            .map(|(&id, _)| id)
+    }
+
+    /// Iterator over all components of a specific type, yielding a reference to each.
+    /// Note that this will panic when advancing the iterator if the next component is
+    /// currently mutably borrowed.
+    pub fn components_ref<'a, T: Component>(&'a self) -> impl Iterator<Item=Ref<'a, T>> {
+        Iter::new(self.components::<T>(), self)
+    }
+
+    
+    /// Iterator over all components of a specific type, yielding a mutable reference
+    /// to each. Note that this will panic when advancing the iterator if the next
+    /// component is currently borrowed.
+    pub fn components_mut<T: Component>(&self) -> impl Iterator<Item=RefMut<T>> {
+        IterMut::new(self.components::<T>(), self)
+    }
 }
 
+pub struct Iter<'a, I: Iterator<Item=ComponentId>, T: Component> {
+    iter: I,
+    parent: &'a Ecs,
+    p: PhantomData<T>
+}
+
+impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iter<'a, I, T> {
+    fn new(iter: I, parent: &'a Ecs) -> Self {
+        Iter {
+            iter,
+            parent,
+            p: PhantomData
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for Iter<'a, I, T> {
+    type Item = Ref<'a, T>;
+
+    fn next(&mut self) -> Option<Ref<'a, T>> {
+        Some(self.parent.borrow_by_id(self.iter.next()?).unwrap())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+pub struct IterMut<'a, I: Iterator<Item=ComponentId>, T: Component> {
+    iter: I,
+    parent: &'a Ecs,
+    p: PhantomData<T>
+}
+
+impl<'a, I: Iterator<Item=ComponentId>, T: Component> IterMut<'a, I, T> {
+    fn new(iter: I, parent: &'a Ecs) -> Self {
+        IterMut {
+            iter,
+            parent,
+            p: PhantomData
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for IterMut<'a, I, T> {
+    type Item = RefMut<'a, T>;
+
+    fn next(&mut self) -> Option<RefMut<'a, T>> {
+        Some(self.parent.borrow_mut_by_id(self.iter.next()?).unwrap())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
 
 pub struct Ref<'a, T: 'static> {
     data: cell::Ref<'a, Box<Any>>,

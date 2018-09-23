@@ -2,6 +2,7 @@
 use std::mem;
 use std::cell::RefCell;
 
+///////////////////////////////////////////////////////////////////////////////////
 // This is a proposed addition to RefCell; for now, I've written an extension trait
 // for the same functionality.
 // https://github.com/rust-lang/rust/issues/54493

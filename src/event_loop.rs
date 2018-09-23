@@ -6,12 +6,13 @@ use ggez::{Context, GameResult};
 
 use super::better_ecs::{Ecs, EntityId, ComponentId};
 use super::ActorType;
+use super::MAX_PHYSICS_VEL;
 
 use ggez::nalgebra as na;
 
 use super::{
     create_player, create_rocks, create_shot, draw_actor, handle_shot_timer, player_handle_input,
-    print_instructions, update_actor_position, vec_from_angle, wrap_actor_position, Assets,
+    print_instructions, vec_from_angle, Assets,
     InputState, PLAYER_SHOT_TIME, SHOT_SPEED,
 };
 
@@ -50,6 +51,40 @@ impl Physics {
             velocity: na::zero(),
             ang_vel: 0.0,
             transform
+        }
+    }
+
+    pub fn update_actor_position(&mut self, system: &Ecs, dt: f32) {
+        let mut transform = system.borrow_mut_by_id::<Transform>(self.transform).unwrap();
+
+        // Clamp the velocity to the max efficiently
+        let norm_sq = self.velocity.norm_squared();
+        if norm_sq > MAX_PHYSICS_VEL.powi(2) {
+            self.velocity = self.velocity / norm_sq.sqrt() * MAX_PHYSICS_VEL;
+        }
+        let dv = self.velocity * (dt);
+        transform.pos += dv;
+        transform.facing += self.ang_vel;
+    }
+
+    /// Takes an actor and wraps its position to the bounds of the
+    /// screen, so if it goes off the left side of the screen it
+    /// will re-enter on the right side and so on.
+    pub fn wrap_actor_position(&mut self, system: &Ecs, sx: f32, sy: f32) {
+        let mut transform = system.borrow_mut_by_id::<Transform>(self.transform).unwrap();
+
+        // Wrap screen
+        let screen_x_bounds = sx / 2.0;
+        let screen_y_bounds = sy / 2.0;
+        if transform.pos.x > screen_x_bounds {
+            transform.pos.x -= sx;
+        } else if transform.pos.x < -screen_x_bounds {
+            transform.pos.x += sx;
+        };
+        if transform.pos.y > screen_y_bounds {
+            transform.pos.y -= sy;
+        } else if transform.pos.y < -screen_y_bounds {
+            transform.pos.y += sy;
         }
     }
 }
@@ -263,36 +298,17 @@ impl EventHandler for MainState {
             }
 
             // Update the physics for all actors.
-            // First the player...
-            update_actor_position(&mut self.system, self.player, seconds);
-            wrap_actor_position(
-                &mut self.system,
-                self.player,
-                self.screen_width as f32,
-                self.screen_height as f32,
-            );
+            self.system.components_mut::<Physics>().for_each(|mut component| {
+                component.update_actor_position(&self.system, seconds);
+                component.wrap_actor_position(
+                    &self.system,
+                    self.screen_width as f32,
+                    self.screen_height as f32,
+                )
+            });
 
-            // Then the shots...
             for &act in &self.shots {
-                update_actor_position(&mut self.system, act, seconds);
-                wrap_actor_position(
-                    &mut self.system,
-                    act,
-                    self.screen_width as f32,
-                    self.screen_height as f32,
-                );
                 handle_shot_timer(&mut self.system, act, seconds);
-            }
-
-            // And finally the rocks.
-            for &act in &self.rocks {
-                update_actor_position(&mut self.system, act, seconds);
-                wrap_actor_position(
-                    &mut self.system,
-                    act,
-                    self.screen_width as f32,
-                    self.screen_height as f32,
-                );
             }
 
             // Handle the results of things moving:

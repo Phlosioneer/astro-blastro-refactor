@@ -28,6 +28,9 @@ use self::better_ecs::{Ecs, EntityId};
 use self::event_loop::{BoundingBox, Health, MainState, Physics, ShotLifetime, Tag, Transform};
 use self::vec::{random_vec, vec_from_angle};
 
+
+pub const MAX_PHYSICS_VEL: f32 = 250.0;
+
 /// *********************************************************************
 /// Now we define our Actor's.
 /// An Actor is anything in the game world.
@@ -234,45 +237,8 @@ pub fn player_thrust(transform: &mut Transform, physics: &mut Physics, dt: f32) 
     physics.velocity += thrust_vector * (dt);
 }
 
-pub const MAX_PHYSICS_VEL: f32 = 250.0;
 
-pub fn update_actor_position(system: &mut Ecs, actor: EntityId, dt: f32) {
-    let mut transform: Transform = system.get(actor).unwrap();
-    let mut physics: Physics = system.get(actor).unwrap();
 
-    // Clamp the velocity to the max efficiently
-    let norm_sq = physics.velocity.norm_squared();
-    if norm_sq > MAX_PHYSICS_VEL.powi(2) {
-        physics.velocity = physics.velocity / norm_sq.sqrt() * MAX_PHYSICS_VEL;
-    }
-    let dv = physics.velocity * (dt);
-    transform.pos += dv;
-    transform.facing += physics.ang_vel;
-
-    system.set(actor, transform).unwrap();
-    system.set(actor, physics).unwrap();
-}
-
-/// Takes an actor and wraps its position to the bounds of the
-/// screen, so if it goes off the left side of the screen it
-/// will re-enter on the right side and so on.
-pub fn wrap_actor_position(system: &mut Ecs, actor: EntityId, sx: f32, sy: f32) {
-    let mut transform= system.borrow_mut::<Transform>(actor).unwrap();
-
-    // Wrap screen
-    let screen_x_bounds = sx / 2.0;
-    let screen_y_bounds = sy / 2.0;
-    if transform.pos.x > screen_x_bounds {
-        transform.pos.x -= sx;
-    } else if transform.pos.x < -screen_x_bounds {
-        transform.pos.x += sx;
-    };
-    if transform.pos.y > screen_y_bounds {
-        transform.pos.y -= sy;
-    } else if transform.pos.y < -screen_y_bounds {
-        transform.pos.y += sy;
-    }
-}
 
 pub fn handle_shot_timer(system: &mut Ecs, actor: EntityId, dt: f32) {
     let mut lifetime = system.borrow_mut::<ShotLifetime>(actor).unwrap();
