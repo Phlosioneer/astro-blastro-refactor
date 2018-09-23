@@ -2,6 +2,7 @@
 //! The idea is that this game is simple but still
 //! non-trivial enough to be interesting.
 
+
 extern crate ggez;
 extern crate rand;
 //extern crate recs;
@@ -11,7 +12,6 @@ use ggez::conf;
 use ggez::event;
 use ggez::graphics;
 use ggez::graphics::Point2;
-use ggez::nalgebra as na;
 use ggez::{Context, ContextBuilder, GameResult};
 
 //use recs::{Ecs, EntityId};
@@ -22,6 +22,7 @@ use std::path;
 mod better_ecs;
 mod event_loop;
 mod vec;
+mod util;
 use self::better_ecs::{Ecs, EntityId};
 
 use self::event_loop::{BoundingBox, Health, MainState, Physics, ShotLifetime, Tag, Transform};
@@ -41,24 +42,6 @@ pub enum ActorType {
     Rock,
     Shot,
 }
-
-/*
-#[derive(Debug)]
-pub struct Actor {
-    tag: ActorType,
-    pos: Point2,
-    facing: f32,
-    velocity: Vector2,
-    ang_vel: f32,
-    bbox_size: f32,
-
-    // I am going to lazily overload "life" with a
-    // double meaning:
-    // for shots, it is the time left to live,
-    // for players and rocks, it is the actual hit points.
-    life: f32,
-}
-*/
 
 pub const PLAYER_LIFE: f32 = 1.0;
 pub const SHOT_LIFE: f32 = 2.0;
@@ -84,30 +67,22 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    system
+    let transform = system
         .set(
             actor,
-            Transform {
-                pos: Point2::origin(),
-                facing: 0.,
-            },
+            Transform::default()
         ).unwrap();
 
     system
         .set(
             actor,
-            Physics {
-                velocity: na::zero(),
-                ang_vel: 0.,
-            },
+            Physics::new(transform),
         ).unwrap();
 
     system
         .set(
             actor,
-            BoundingBox {
-                bbox_size: PLAYER_BBOX,
-            },
+            BoundingBox::new(PLAYER_BBOX, transform),
         ).unwrap();
 
     system
@@ -132,30 +107,22 @@ pub fn create_rock(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    system
+    let transform = system
         .set(
             actor,
-            Transform {
-                pos: Point2::origin(),
-                facing: 0.,
-            },
+            Transform::default(),
         ).unwrap();
 
     system
         .set(
             actor,
-            Physics {
-                velocity: na::zero(),
-                ang_vel: 0.,
-            },
+            Physics::new(transform),
         ).unwrap();
 
     system
         .set(
             actor,
-            BoundingBox {
-                bbox_size: ROCK_BBOX,
-            },
+            BoundingBox::new(ROCK_BBOX, transform),
         ).unwrap();
 
     system.set(actor, Health { health: ROCK_LIFE }).unwrap();
@@ -174,30 +141,22 @@ pub fn create_shot(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    system
+    let transform = system
         .set(
             actor,
-            Transform {
-                pos: Point2::origin(),
-                facing: 0.,
-            },
+            Transform::default(),
         ).unwrap();
 
     system
         .set(
             actor,
-            Physics {
-                velocity: na::zero(),
-                ang_vel: SHOT_ANG_VEL,
-            },
+            Physics::new(transform),
         ).unwrap();
 
     system
         .set(
             actor,
-            BoundingBox {
-                bbox_size: SHOT_BBOX,
-            },
+            BoundingBox::new(SHOT_BBOX, transform),
         ).unwrap();
 
     system.set(actor, ShotLifetime { time: SHOT_LIFE }).unwrap();
@@ -224,10 +183,10 @@ pub fn create_rocks(
         let r_angle = rand::random::<f32>() * 2.0 * std::f32::consts::PI;
         let r_distance = rand::random::<f32>() * (max_radius - min_radius) + min_radius;
 
-        let transfrom: &mut Transform = system.borrow_mut(rock).unwrap();
+        let mut transfrom = system.borrow_mut::<Transform>(rock).unwrap();
         transfrom.pos = exclusion + vec_from_angle(r_angle) * r_distance;
 
-        let physics: &mut Physics = system.borrow_mut(rock).unwrap();
+        let mut physics = system.borrow_mut::<Physics>(rock).unwrap();
         physics.velocity = random_vec(MAX_ROCK_VEL);
 
         rock
@@ -298,7 +257,7 @@ pub fn update_actor_position(system: &mut Ecs, actor: EntityId, dt: f32) {
 /// screen, so if it goes off the left side of the screen it
 /// will re-enter on the right side and so on.
 pub fn wrap_actor_position(system: &mut Ecs, actor: EntityId, sx: f32, sy: f32) {
-    let transform: &mut Transform = system.borrow_mut(actor).unwrap();
+    let mut transform= system.borrow_mut::<Transform>(actor).unwrap();
 
     // Wrap screen
     let screen_x_bounds = sx / 2.0;
@@ -316,7 +275,7 @@ pub fn wrap_actor_position(system: &mut Ecs, actor: EntityId, sx: f32, sy: f32) 
 }
 
 pub fn handle_shot_timer(system: &mut Ecs, actor: EntityId, dt: f32) {
-    let lifetime: &mut ShotLifetime = system.borrow_mut(actor).unwrap();
+    let mut lifetime = system.borrow_mut::<ShotLifetime>(actor).unwrap();
     lifetime.time -= dt;
 }
 
@@ -367,7 +326,7 @@ impl Assets {
         })
     }
 
-    pub fn actor_image(&mut self, system: &mut Ecs, actor: EntityId) -> &mut graphics::Image {
+    pub fn actor_image(&mut self, system: &Ecs, actor: EntityId) -> &mut graphics::Image {
         match system.get::<Tag>(actor).unwrap().tag {
             ActorType::Player => &mut self.player_image,
             ActorType::Rock => &mut self.rock_image,
@@ -414,11 +373,11 @@ pub fn print_instructions() {
 pub fn draw_actor(
     assets: &mut Assets,
     ctx: &mut Context,
-    system: &mut Ecs,
+    system: &Ecs,
     actor: EntityId,
     world_coords: (u32, u32),
 ) -> GameResult<()> {
-    let transform: &Transform = system.borrow(actor).unwrap();
+    let transform = system.borrow::<Transform>(actor).unwrap();
     let (screen_w, screen_h) = world_coords;
     let pos = world_to_screen_coords(screen_w, screen_h, transform.pos);
     let drawparams = graphics::DrawParam {

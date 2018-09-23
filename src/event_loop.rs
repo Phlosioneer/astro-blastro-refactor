@@ -3,9 +3,11 @@ use ggez::graphics::{self, Point2, Vector2};
 use ggez::timer;
 use ggez::{Context, GameResult};
 
-use super::better_ecs::{Ecs, EntityId};
 
+use super::better_ecs::{Ecs, EntityId, ComponentId};
 use super::ActorType;
+
+use ggez::nalgebra as na;
 
 use super::{
     create_player, create_rocks, create_shot, draw_actor, handle_shot_timer, player_handle_input,
@@ -25,15 +27,47 @@ pub struct Transform {
     pub facing: f32,
 }
 
+impl Default for Transform {
+    fn default() -> Self {
+        Transform {
+            pos: Point2::origin(),
+            facing: 0.0
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Physics {
     pub velocity: Vector2,
     pub ang_vel: f32,
+
+    pub transform: ComponentId
+}
+
+impl Physics {
+    pub fn new(transform: ComponentId) -> Self {
+        Physics {
+            velocity: na::zero(),
+            ang_vel: 0.0,
+            transform
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct BoundingBox {
     pub bbox_size: f32,
+
+    pub transform: ComponentId
+}
+
+impl BoundingBox {
+    pub fn new(bbox_size: f32, transform: ComponentId) -> Self {
+        BoundingBox {
+            bbox_size,
+            transform
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -121,14 +155,19 @@ impl MainState {
         let shot = create_shot(&mut self.system);
 
         let player_transform: Transform = self.system.get(self.player).unwrap();
-        let shot_transform: &mut Transform = self.system.borrow_mut(shot).unwrap();
-        shot_transform.pos = player_transform.pos;
-        shot_transform.facing = player_transform.facing;
-        let direction = vec_from_angle(shot_transform.facing);
+        let direction;
+        {
+            let mut shot_transform = self.system.borrow_mut::<Transform>(shot).unwrap();
+            shot_transform.pos = player_transform.pos;
+            shot_transform.facing = player_transform.facing;
+            direction = vec_from_angle(shot_transform.facing);
+        }
 
-        let shot_physics: &mut Physics = self.system.borrow_mut(shot).unwrap();
-        shot_physics.velocity.x = SHOT_SPEED * direction.x;
-        shot_physics.velocity.y = SHOT_SPEED * direction.y;
+        {
+            let mut shot_physics = self.system.borrow_mut::<Physics>(shot).unwrap();
+            shot_physics.velocity.x = SHOT_SPEED * direction.x;
+            shot_physics.velocity.y = SHOT_SPEED * direction.y;
+        }
 
         self.shots.push(shot);
         let _ = self.assets.shot_sound.play();
