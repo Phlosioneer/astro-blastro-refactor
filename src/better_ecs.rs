@@ -1,6 +1,9 @@
 // Code heavily based on (but not copied from) recs:
 // https://github.com/AndyBarron/rustic-ecs
 
+// This is intended as a library; not everything has to be immediately useful.
+#![allow(unused)]
+
 ///! This library is heavily based on Rustic Ecs ("Recs"), go there if
 ///! documentation here is lacking: https://github.com/AndyBarron/rustic-ecs
 use std::any::{Any, TypeId};
@@ -122,6 +125,88 @@ impl ComponentEntry {
     }
 }
 
+pub struct EntityBuilder<'a> {
+    parent: &'a mut Ecs,
+    entity: EntityId,
+    err: Option<EcsError>
+}
+
+impl<'a> EntityBuilder<'a> {
+    pub fn new(parent: &'a mut Ecs, entity: EntityId) -> Self {
+        EntityBuilder {
+            parent,
+            entity,
+            err: None
+        }
+    }
+
+    pub fn with<T: Component>(mut self, component: T) -> Self {
+        if self.err.is_some() {
+            return self;
+        }
+
+        if let Err(e) = self.parent.set::<T>(self.entity, component) {
+            self.err = Some(e);
+        }
+
+        self
+    }
+
+    pub fn with1<A: Component, F, T: Component>(mut self, f: F) -> Self
+        where F: FnOnce(ComponentRef<A>) -> T
+    {
+        if self.err.is_some() {
+            return self;
+        }
+
+        let arg1 = match self.parent.lookup_component::<A>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+
+        let component = f(arg1.into());
+
+        if let Err(e) = self.parent.set(self.entity, component) {
+            self.err = Some(e);
+        }
+
+        self
+    }
+
+    pub fn with2<A: Component, B: Component, F, T: Component>(mut self, f: F) -> Self
+        where F: FnOnce(ComponentRef<A>, ComponentRef<B>) -> T
+    {
+        if self.err.is_some() {
+            return self;
+        }
+
+        let arg1 = match self.parent.lookup_component::<A>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+        let arg2 = match self.parent.lookup_component::<B>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+
+        let component = f(arg1.into(), arg2.into());
+
+        if let Err(e) = self.parent.set(self.entity, component) {
+            self.err = Some(e);
+        }
+
+        self
+    }
+
+    pub fn build(self) -> Result<EntityId, EcsError> {
+        match self.err {
+            Some(e) => Err(e),
+            None => Ok(self.entity)
+        }
+    }
+}
+
+
 /// The Entity Component System object. It contains all entities and
 /// components.
 pub struct Ecs {
@@ -224,6 +309,17 @@ impl Ecs {
     /// so this practically never fails.
     pub fn create_entity(&mut self) -> EntityId {
         self.try_create_entity().unwrap()
+    }
+
+    /// Create an entity, with a builder to add components.
+    ///
+    /// Panics if no more unique `EntityIds` can be generated.
+    ///
+    /// The ECS can go through `n^64-1` unique ID's before panicking,
+    /// so this practically never fails.
+    pub fn build_entity(&mut self) -> EntityBuilder {
+        let id = self.create_entity();
+        EntityBuilder::new(self, id)
     }
 
     // Note: Does not touch the entities map.

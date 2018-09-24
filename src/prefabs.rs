@@ -20,90 +20,41 @@ pub const SHOT_BBOX: f32 = 6.0;
 /// **********************************************************************
 
 pub fn create_player(system: &mut Ecs) -> EntityId {
-    let actor = system.create_entity();
-    let tag = system
-        .set(
-            actor,
-            Tag {
-                tag: ActorType::Player,
-            },
-        ).unwrap();
-
-    let transform = system.set(actor, Transform::default()).unwrap();
-
-    let physics = system.set(actor, Physics::new(transform)).unwrap();
-
-    system.set(actor, Sprite::new(tag, transform)).unwrap();
-
-    system
-        .set(actor, BoundingBox::new(PLAYER_BBOX, transform))
-        .unwrap();
-
-    system
-        .set(
-            actor,
-            Health {
-                health: PLAYER_LIFE,
-            },
-        ).unwrap();
-
-    system.set(actor, Player::new(transform, physics)).unwrap();
-
-    actor
+    system.build_entity()
+        .with(Tag::new(ActorType::Player))
+        .with(Transform::default())
+        .with1(Physics::new)
+        .with2(Sprite::new)
+        .with1(|transform| BoundingBox::new(PLAYER_BBOX, transform))
+        .with(Health::new(PLAYER_LIFE))
+        .with2(Player::new)
+        .build()
+        .unwrap()
 }
 
 pub fn create_rock(system: &mut Ecs) -> EntityId {
-    let actor = system.create_entity();
-
-    let tag = system
-        .set(
-            actor,
-            Tag {
-                tag: ActorType::Rock,
-            },
-        ).unwrap();
-
-    system.set(actor, Rock).unwrap();
-
-    let transform = system.set(actor, Transform::default()).unwrap();
-
-    system.set(actor, Sprite::new(tag, transform)).unwrap();
-
-    system.set(actor, Physics::new(transform)).unwrap();
-
-    system
-        .set(actor, BoundingBox::new(ROCK_BBOX, transform))
-        .unwrap();
-
-    system.set(actor, Health { health: ROCK_LIFE }).unwrap();
-
-    actor
+    system.build_entity()
+        .with(Tag::new(ActorType::Rock))
+        .with(Transform::default())
+        .with1(Physics::new)
+        .with2(Sprite::new)
+        .with1(|transform| BoundingBox::new(ROCK_BBOX, transform))
+        .with(Health::new(ROCK_LIFE))
+        .with(Rock)
+        .build()
+        .unwrap()
 }
 
 pub fn create_shot(system: &mut Ecs) -> EntityId {
-    let actor = system.create_entity();
-
-    let tag = system
-        .set(
-            actor,
-            Tag {
-                tag: ActorType::Shot,
-            },
-        ).unwrap();
-
-    let transform = system.set(actor, Transform::default()).unwrap();
-
-    system.set(actor, Physics::new(transform)).unwrap();
-
-    system.set(actor, Sprite::new(tag, transform)).unwrap();
-
-    system
-        .set(actor, BoundingBox::new(SHOT_BBOX, transform))
-        .unwrap();
-
-    system.set(actor, ShotLifetime { time: SHOT_LIFE }).unwrap();
-
-    actor
+    system.build_entity()
+        .with(Tag::new(ActorType::Shot))
+        .with(Transform::default())
+        .with1(Physics::new)
+        .with2(Sprite::new)
+        .with1(|transform| BoundingBox::new(SHOT_BBOX, transform))
+        .with(ShotLifetime::new(SHOT_LIFE))
+        .build()
+        .unwrap()
 }
 
 /// Create the given number of rocks.

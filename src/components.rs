@@ -2,7 +2,7 @@ use ggez::graphics::{self, Point2, Vector2};
 use ggez::nalgebra as na;
 use ggez::{Context, GameResult};
 
-use super::better_ecs::{ComponentId, ComponentRef, Ecs};
+use super::better_ecs::{ComponentRef, Ecs};
 use super::prefabs::create_shot;
 use super::vec::vec_from_angle;
 use super::world_to_screen_coords;
@@ -31,7 +31,7 @@ pub const PLAYER_TURN_RATE: f32 = 3.0;
 pub const PLAYER_SHOT_TIME: f32 = 0.5;
 
 impl Player {
-    pub fn new(transform: ComponentId, physics: ComponentId) -> Self {
+    pub fn new(transform: ComponentRef<Transform>, physics: ComponentRef<Physics>) -> Self {
         Player {
             player_shot_timeout: PLAYER_SHOT_TIME,
             transform: transform.into(),
@@ -98,6 +98,14 @@ pub struct Tag {
     pub tag: ActorType,
 }
 
+impl Tag {
+    pub fn new(tag: ActorType) -> Tag {
+        Tag {
+            tag
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Rock;
 
@@ -125,11 +133,12 @@ pub struct Physics {
 }
 
 impl Physics {
-    pub fn new(transform: ComponentId) -> Self {
+
+    pub fn new(transform: ComponentRef<Transform>) -> Self {
         Physics {
             velocity: na::zero(),
             ang_vel: 0.0,
-            transform: transform.into(),
+            transform,
         }
     }
 
@@ -176,10 +185,10 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    pub fn new(bbox_size: f32, transform: ComponentId) -> Self {
+    pub fn new(bbox_size: f32, transform: ComponentRef<Transform>) -> Self {
         BoundingBox {
             bbox_size,
-            transform: transform.into(),
+            transform,
         }
     }
 }
@@ -189,12 +198,22 @@ pub struct Health {
     pub health: f32,
 }
 
+impl Health {
+    pub fn new(health: f32) -> Health {
+        Health { health }
+    }
+}
+
 #[derive(Clone)]
 pub struct ShotLifetime {
     pub time: f32,
 }
 
 impl ShotLifetime {
+    pub fn new(time: f32) -> ShotLifetime {
+        ShotLifetime { time }
+    }
+
     pub fn handle_shot_timer(&mut self, dt: f32) {
         self.time -= dt;
     }
@@ -207,10 +226,10 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    pub fn new(tag: ComponentId, transform: ComponentId) -> Self {
+    pub fn new(tag: ComponentRef<Tag>, transform: ComponentRef<Transform>) -> Self {
         Sprite {
-            tag: tag.into(),
-            transform: transform.into(),
+            tag,
+            transform,
         }
     }
 
