@@ -27,7 +27,7 @@ mod vec;
 use self::better_ecs::{Ecs, EntityId};
 
 use self::event_loop::{
-    BoundingBox, Health, MainState, Physics, Player, Rock, ShotLifetime, Tag, Transform,
+    BoundingBox, Health, MainState, Sprite, Physics, Player, Rock, ShotLifetime, Tag, Transform,
 };
 use self::vec::{random_vec, vec_from_angle};
 
@@ -64,7 +64,7 @@ pub const MAX_ROCK_VEL: f32 = 50.0;
 
 pub fn create_player(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
-    system
+    let tag = system
         .set(
             actor,
             Tag {
@@ -75,6 +75,8 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
     let transform = system.set(actor, Transform::default()).unwrap();
 
     let physics = system.set(actor, Physics::new(transform)).unwrap();
+
+    system.set(actor, Sprite::new(tag, transform)).unwrap();
 
     system
         .set(actor, BoundingBox::new(PLAYER_BBOX, transform))
@@ -96,7 +98,7 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
 pub fn create_rock(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
 
-    system
+    let tag = system
         .set(
             actor,
             Tag {
@@ -107,6 +109,8 @@ pub fn create_rock(system: &mut Ecs) -> EntityId {
     system.set(actor, Rock).unwrap();
 
     let transform = system.set(actor, Transform::default()).unwrap();
+
+    system.set(actor, Sprite::new(tag, transform)).unwrap();
 
     system.set(actor, Physics::new(transform)).unwrap();
 
@@ -122,7 +126,7 @@ pub fn create_rock(system: &mut Ecs) -> EntityId {
 pub fn create_shot(system: &mut Ecs) -> EntityId {
     let actor = system.create_entity();
 
-    system
+    let tag = system
         .set(
             actor,
             Tag {
@@ -133,6 +137,9 @@ pub fn create_shot(system: &mut Ecs) -> EntityId {
     let transform = system.set(actor, Transform::default()).unwrap();
 
     system.set(actor, Physics::new(transform)).unwrap();
+
+    system.set(actor, Sprite::new(tag, transform)).unwrap();
+
 
     system
         .set(actor, BoundingBox::new(SHOT_BBOX, transform))
@@ -233,11 +240,11 @@ impl Assets {
         })
     }
 
-    pub fn actor_image(&mut self, system: &Ecs, actor: EntityId) -> &mut graphics::Image {
-        match system.get::<Tag>(actor).unwrap().tag {
-            ActorType::Player => &mut self.player_image,
-            ActorType::Rock => &mut self.rock_image,
-            ActorType::Shot => &mut self.shot_image,
+    pub fn actor_image(&self, tag: &ActorType) -> &graphics::Image {
+        match &tag {
+            ActorType::Player => &self.player_image,
+            ActorType::Rock => &self.rock_image,
+            ActorType::Shot => &self.shot_image,
         }
     }
 }
@@ -277,25 +284,7 @@ pub fn print_instructions() {
     println!();
 }
 
-pub fn draw_actor(
-    assets: &mut Assets,
-    ctx: &mut Context,
-    system: &Ecs,
-    actor: EntityId,
-    world_coords: (u32, u32),
-) -> GameResult<()> {
-    let transform = system.borrow::<Transform>(actor).unwrap();
-    let (screen_w, screen_h) = world_coords;
-    let pos = world_to_screen_coords(screen_w, screen_h, transform.pos);
-    let drawparams = graphics::DrawParam {
-        dest: pos,
-        rotation: transform.facing as f32,
-        offset: graphics::Point2::new(0.5, 0.5),
-        ..Default::default()
-    };
-    let image = assets.actor_image(system, actor);
-    graphics::draw_ex(ctx, image, drawparams)
-}
+
 
 /// **********************************************************************
 /// Finally our main function!  Which merely sets up a config and calls

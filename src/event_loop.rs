@@ -10,7 +10,7 @@ use super::MAX_PHYSICS_VEL;
 use ggez::nalgebra as na;
 
 use super::{
-    create_player, create_rocks, create_shot, draw_actor, print_instructions, vec_from_angle,
+    create_player, create_rocks, create_shot, world_to_screen_coords, print_instructions, vec_from_angle,
     Assets, InputState, SHOT_SPEED,
 };
 
@@ -202,6 +202,41 @@ pub struct ShotLifetime {
 impl ShotLifetime {
     pub fn handle_shot_timer(&mut self, dt: f32) {
         self.time -= dt;
+    }
+}
+
+#[derive(Clone)]
+pub struct Sprite {
+    pub tag: ComponentId,
+    pub transform: ComponentId
+}
+
+impl Sprite {
+    pub fn new(tag: ComponentId, transform: ComponentId) -> Self {
+        Sprite {
+            tag, transform
+        }
+    }
+
+    pub fn draw_actor(
+        &self,
+        assets: &Assets,
+        ctx: &mut Context,
+        system: &Ecs,
+        world_coords: (u32, u32),
+    ) -> GameResult<()> {
+        let transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
+        let (screen_w, screen_h) = world_coords;
+        let pos = world_to_screen_coords(screen_w, screen_h, transform.pos);
+        let drawparams = graphics::DrawParam {
+            dest: pos,
+            rotation: transform.facing as f32,
+            offset: graphics::Point2::new(0.5, 0.5),
+            ..Default::default()
+        };
+        let tag = &system.borrow_by_id::<Tag>(self.tag).unwrap().tag;
+        let image = assets.actor_image(tag);
+        graphics::draw_ex(ctx, image, drawparams)
     }
 }
 
@@ -432,14 +467,8 @@ impl EventHandler for MainState {
         {
             let coords = (self.screen_width, self.screen_height);
 
-            draw_actor(&mut self.assets, ctx, &mut self.system, self.player, coords)?;
-
-            for s in self.system.entities_with::<ShotLifetime>() {
-                draw_actor(&mut self.assets, ctx, &mut self.system, s, coords)?;
-            }
-
-            for r in self.system.entities_with::<Rock>() {
-                draw_actor(&mut self.assets, ctx, &mut self.system, r, coords)?;
+            for (_, sprite) in self.system.components_ref::<Sprite>() {
+                sprite.draw_actor(&self.assets, ctx, &self.system, coords).unwrap();
             }
         }
 
