@@ -151,72 +151,9 @@ impl Ecs {
         if other.entities.len() == 0 {
             return;
         }
-        println!("Merging...");
 
         self.components.extend(other.components);
         self.entities.extend(other.entities);
-
-        /*
-        for (old_id, component_data) in other_components {
-            let new_id = self.create_component_id().unwrap();
-            old_to_new_map.insert(old_id, new_id);
-
-            // Note: parent references are broken!
-            self.components.insert(new_id, component_data);
-        }
-
-        println!("Old->New: {:?}", old_to_new_map);
-
-        for (old_id, attached_components) in other_entities {
-            let new_id = self.create_entity_id().unwrap();
-            println!("Entity: Old->New: {:?} -> {:?}", old_id, new_id);
-            let new_attached_components: HashMap<_, _> = attached_components.into_iter()
-                .map(|(type_id, old_component_id)| (type_id, *old_to_new_map.get(&old_component_id).unwrap()))
-                .collect();
-            println!("Components: {:?}", new_attached_components);
-            for &component in new_attached_components.values() {
-                self.components.get_mut(&component).unwrap().parent = new_id;
-            }
-            self.entities.insert(new_id, new_attached_components);
-        }
-
-        // Ensure no foreign ID's are left.
-        assert_eq!(self.components.keys()
-            .filter(|&ComponentId(ecs_id, _)| self.ecs_id != *ecs_id)
-            .map(|&id| id)
-            .collect::<Vec<_>>(), Vec::new());
-        assert_eq!(self.entities.keys()
-            .filter(|&EntityId(ecs_id, _)| self.ecs_id != *ecs_id)
-            .map(|&id| id)
-            .collect::<Vec<_>>(), Vec::new());
-        assert_eq!(self.components.values()
-            .map(|data| data.parent)
-            .filter(|EntityId(ecs_id, _)| self.ecs_id != *ecs_id)
-            .collect::<Vec<_>>(), Vec::new());
-        assert_eq!(self.entities.values()
-            .flat_map(|map| map.values().map(|&id| id))
-            .filter(|ComponentId(ecs_id, _)| self.ecs_id != *ecs_id)
-            .collect::<Vec<_>>(), Vec::new());
-
-        // Ensure that each component's parent field is valid.
-        assert_eq!(self.components.iter()
-            .map(|(id, data)| (*id, data.parent))
-            .filter(|(comp_id, parent_id)| self.entities.get(&parent_id)
-                .unwrap()
-                .values()
-                .find(|&v| v == comp_id)
-                .is_none())
-            .collect::<Vec<_>>(), Vec::new());
-        
-        // Ensure that each entity's components are valid.
-        assert_eq!(self.entities.iter()
-            .map(|(parent_id, attached)| (parent_id, attached.values()
-                .map(|comp_id| (comp_id, self.components.get(comp_id)
-                    .map(|data| data.parent == *parent_id)))
-                .filter(|(_, res)| *res != Some(true))
-                .collect::<Vec<_>>()))
-            .filter(|(_, results_vec)| *results_vec != Vec::new())
-            .collect::<Vec<_>>(), Vec::new());*/
     }
 
     fn create_entity_id(&mut self) -> Option<EntityId> {
