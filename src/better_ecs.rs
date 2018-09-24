@@ -55,10 +55,7 @@ pub struct ComponentRef<T: Component> {
 
 impl<T: Component> ComponentRef<T> {
     pub fn new(id: ComponentId) -> Self {
-        ComponentRef {
-            id,
-            p: PhantomData
-        }
+        ComponentRef { id, p: PhantomData }
     }
 
     pub fn from_entity(id: EntityId, ecs: &Ecs) -> Result<Self, EcsError> {
