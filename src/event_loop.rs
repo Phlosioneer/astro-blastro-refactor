@@ -5,7 +5,7 @@ use ggez::{Context, GameResult};
 
 use super::better_ecs::{Ecs, EntityId};
 use super::components::{
-    BoundingBox, Health, Physics, Player, Rock, ShotLifetime, Sprite, Transform, Collider
+    Health, Physics, Player, Rock, ShotLifetime, Sprite, Transform, Collider
 };
 
 use super::prefabs::{create_player, create_rocks};

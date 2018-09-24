@@ -1,6 +1,6 @@
 [package]
-name = "cavern-carvers"
-version = "0.1.0"
+name = "astro-blasto-refactor"
+version = "0.2.0"
 authors = ["Phlosioneer <mattmdrr2@gmail.com>"]
 edition = "2018"
 
