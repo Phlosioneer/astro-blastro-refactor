@@ -46,10 +46,44 @@ pub struct EntityId(EcsId, IdNumber);
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ComponentId(EcsId, IdNumber);
 
-/// A convenient way to store Entities
+/// A convenient way to store ComponentIds with type information.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct EntityRef {
-    id: EntityId,
+pub struct ComponentRef<T: Component> {
+    id: ComponentId,
+    p: PhantomData<T>,
+}
+
+impl<T: Component> ComponentRef<T> {
+    pub fn new(id: ComponentId) -> Self {
+        ComponentRef {
+            id,
+            p: PhantomData
+        }
+    }
+
+    pub fn from_entity(id: EntityId, ecs: &Ecs) -> Result<Self, EcsError> {
+        Ok(Self::new(ecs.lookup_component::<T>(id)?))
+    }
+
+    pub fn borrow<'a>(&self, ecs: &'a Ecs) -> Result<Ref<'a, T>, EcsError> {
+        ecs.borrow_by_id(self.id)
+    }
+
+    pub fn borrow_mut<'a>(&self, ecs: &'a Ecs) -> Result<RefMut<'a, T>, EcsError> {
+        ecs.borrow_mut_by_id(self.id)
+    }
+}
+
+impl<T: Component + Clone> ComponentRef<T> {
+    pub fn get(&self, ecs: &Ecs) -> Result<T, EcsError> {
+        ecs.get_by_id(self.id)
+    }
+}
+
+impl<T: Component> From<ComponentId> for ComponentRef<T> {
+    fn from(other: ComponentId) -> ComponentRef<T> {
+        ComponentRef::new(other)
+    }
 }
 
 /// An error type for the Ecs.

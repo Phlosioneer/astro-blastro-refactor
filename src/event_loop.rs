@@ -3,7 +3,7 @@ use ggez::graphics::{self, Point2, Vector2};
 use ggez::timer;
 use ggez::{Context, GameResult};
 
-use super::better_ecs::{ComponentId, Ecs, EntityId};
+use super::better_ecs::{ComponentId, ComponentRef, Ecs, EntityId};
 use super::ActorType;
 use super::MAX_PHYSICS_VEL;
 
@@ -18,8 +18,8 @@ use super::{
 #[derive(Clone)]
 pub struct Player {
     pub player_shot_timeout: f32,
-    pub transform: ComponentId,
-    pub physics: ComponentId,
+    pub transform: ComponentRef<Transform>,
+    pub physics: ComponentRef<Physics>,
 }
 
 // Acceleration in pixels per second.
@@ -33,15 +33,13 @@ impl Player {
     pub fn new(transform: ComponentId, physics: ComponentId) -> Self {
         Player {
             player_shot_timeout: PLAYER_SHOT_TIME,
-            transform,
-            physics,
+            transform: transform.into(),
+            physics: physics.into(),
         }
     }
 
     pub fn player_handle_input(&mut self, system: &Ecs, input: &InputState, dt: f32) {
-        let mut transform = system
-            .borrow_mut_by_id::<Transform>(self.transform)
-            .unwrap();
+        let mut transform = self.transform.borrow_mut(system).unwrap();
 
         transform.facing += dt * PLAYER_TURN_RATE * input.xaxis;
 
@@ -53,8 +51,8 @@ impl Player {
     }
 
     pub fn player_thrust(&mut self, system: &Ecs, dt: f32) {
-        let transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
-        let mut physics = system.borrow_mut_by_id::<Physics>(self.physics).unwrap();
+        let transform = self.transform.borrow(system).unwrap();
+        let mut physics = self.physics.borrow_mut(system).unwrap();
         let direction_vector = vec_from_angle(transform.facing);
         let thrust_vector = direction_vector * (PLAYER_THRUST);
         physics.velocity += thrust_vector * (dt);
@@ -81,7 +79,7 @@ impl Player {
         let mut shot_transform = new_shots_ecs.borrow_mut::<Transform>(shot).unwrap();
         let mut shot_physics = new_shots_ecs.borrow_mut::<Physics>(shot).unwrap();
 
-        let player_transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
+        let player_transform = self.transform.borrow(system).unwrap();
         shot_transform.pos = player_transform.pos;
         shot_transform.facing = player_transform.facing;
         let direction = vec_from_angle(shot_transform.facing);
@@ -122,7 +120,7 @@ pub struct Physics {
     pub velocity: Vector2,
     pub ang_vel: f32,
 
-    pub transform: ComponentId,
+    pub transform: ComponentRef<Transform>,
 }
 
 impl Physics {
@@ -130,14 +128,12 @@ impl Physics {
         Physics {
             velocity: na::zero(),
             ang_vel: 0.0,
-            transform,
+            transform: transform.into(),
         }
     }
 
     pub fn update_actor_position(&mut self, system: &Ecs, dt: f32) {
-        let mut transform = system
-            .borrow_mut_by_id::<Transform>(self.transform)
-            .unwrap();
+        let mut transform = self.transform.borrow_mut(system).unwrap();
 
         // Clamp the velocity to the max efficiently
         let norm_sq = self.velocity.norm_squared();
@@ -153,9 +149,7 @@ impl Physics {
     /// screen, so if it goes off the left side of the screen it
     /// will re-enter on the right side and so on.
     pub fn wrap_actor_position(&mut self, system: &Ecs, sx: f32, sy: f32) {
-        let mut transform = system
-            .borrow_mut_by_id::<Transform>(self.transform)
-            .unwrap();
+        let mut transform = self.transform.borrow_mut(system).unwrap();
 
         // Wrap screen
         let screen_x_bounds = sx / 2.0;
@@ -177,14 +171,14 @@ impl Physics {
 pub struct BoundingBox {
     pub bbox_size: f32,
 
-    pub transform: ComponentId,
+    pub transform: ComponentRef<Transform>,
 }
 
 impl BoundingBox {
     pub fn new(bbox_size: f32, transform: ComponentId) -> Self {
         BoundingBox {
             bbox_size,
-            transform,
+            transform: transform.into(),
         }
     }
 }
@@ -207,14 +201,15 @@ impl ShotLifetime {
 
 #[derive(Clone)]
 pub struct Sprite {
-    pub tag: ComponentId,
-    pub transform: ComponentId
+    pub tag: ComponentRef<Tag>,
+    pub transform: ComponentRef<Transform>
 }
 
 impl Sprite {
     pub fn new(tag: ComponentId, transform: ComponentId) -> Self {
         Sprite {
-            tag, transform
+            tag: tag.into(),
+            transform: transform.into(),
         }
     }
 
@@ -225,7 +220,7 @@ impl Sprite {
         system: &Ecs,
         world_coords: (u32, u32),
     ) -> GameResult<()> {
-        let transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
+        let transform = self.transform.borrow(system).unwrap();
         let (screen_w, screen_h) = world_coords;
         let pos = world_to_screen_coords(screen_w, screen_h, transform.pos);
         let drawparams = graphics::DrawParam {
@@ -234,7 +229,7 @@ impl Sprite {
             offset: graphics::Point2::new(0.5, 0.5),
             ..Default::default()
         };
-        let tag = &system.borrow_by_id::<Tag>(self.tag).unwrap().tag;
+        let tag = &self.tag.borrow(system).unwrap().tag;
         let image = assets.actor_image(tag);
         graphics::draw_ex(ctx, image, drawparams)
     }
