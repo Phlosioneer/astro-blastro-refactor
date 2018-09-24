@@ -198,6 +198,35 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
+    pub fn with3<A: Component, B: Component, C: Component, F, T: Component>(mut self, f: F) -> Self
+        where F: FnOnce(ComponentRef<A>, ComponentRef<B>, ComponentRef<C>) -> T
+    {
+        if self.err.is_some() {
+            return self;
+        }
+
+        let arg1 = match self.parent.lookup_component::<A>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+        let arg2 = match self.parent.lookup_component::<B>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+        let arg3 = match self.parent.lookup_component::<C>(self.entity) {
+            Ok(a) => a,
+            Err(e) => {self.err = Some(e); return self;}
+        };
+
+        let component = f(arg1.into(), arg2.into(), arg3.into());
+
+        if let Err(e) = self.parent.set(self.entity, component) {
+            self.err = Some(e);
+        }
+
+        self
+    }
+
     pub fn build(self) -> Result<EntityId, EcsError> {
         match self.err {
             Some(e) => Err(e),

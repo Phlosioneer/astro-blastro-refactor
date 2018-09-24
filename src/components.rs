@@ -177,6 +177,7 @@ impl Physics {
     }
 }
 
+// Note: This is actually implemented as a bounding CIRCLE, not a box...
 #[derive(Clone)]
 pub struct BoundingBox {
     pub bbox_size: f32,
@@ -189,6 +190,54 @@ impl BoundingBox {
         BoundingBox {
             bbox_size,
             transform,
+        }
+    }
+
+    pub fn is_touching(&self, system: &Ecs, other: &BoundingBox) -> bool {
+        let transform = self.transform.borrow(system).unwrap();
+        let other_transform = other.transform.borrow(system).unwrap();
+
+        let pdistance = transform.pos - other_transform.pos;
+        
+        pdistance.norm() < (self.bbox_size + other.bbox_size)
+    }
+}
+
+#[derive(Clone)]
+pub struct Collider {
+    pub bounds: ComponentRef<BoundingBox>,
+    pub health: ComponentRef<Health>,
+}
+
+impl Collider {
+    pub fn new(
+            bounds: ComponentRef<BoundingBox>,
+            health: ComponentRef<Health>) -> Collider
+    {
+        Collider {
+            bounds,
+            health
+        }
+    }
+
+    pub fn check_for_collisions(&self, system: &Ecs, assets: &Assets) {
+        let rock_bbox = self.bounds.borrow(system).unwrap();
+
+        for player in system.entities_with::<Player>() {
+            let player_bbox = system.get::<BoundingBox>(player).unwrap();
+
+            if rock_bbox.is_touching(system, &player_bbox) {
+                system.borrow_mut::<Health>(player).unwrap().health = 0.0;
+            }
+        }
+        for shot in system.entities_with::<ShotLifetime>() {
+            let shot_bbox = system.get::<BoundingBox>(shot).unwrap();
+
+            if rock_bbox.is_touching(system, &shot_bbox) {
+                system.borrow_mut::<ShotLifetime>(shot).unwrap().time = 0.0;
+                self.health.borrow_mut(system).unwrap().health = 0.0;
+                assets.hit_sound.play().unwrap();
+            }
         }
     }
 }

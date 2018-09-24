@@ -5,7 +5,7 @@ use ggez::{Context, GameResult};
 
 use super::better_ecs::{Ecs, EntityId};
 use super::components::{
-    BoundingBox, Health, Physics, Player, Rock, ShotLifetime, Sprite, Transform,
+    BoundingBox, Health, Physics, Player, Rock, ShotLifetime, Sprite, Transform, Collider
 };
 
 use super::prefabs::{create_player, create_rocks};
@@ -23,10 +23,12 @@ use super::{print_instructions, Assets, InputState};
 /// this small it hardly matters.
 /// **********************************************************************
 
+type Score = u32;
+
 pub struct MainState {
     player: EntityId,
     level: i32,
-    score: i32,
+    score: Score,
     assets: Assets,
     screen_width: u32,
     screen_height: u32,
@@ -76,53 +78,30 @@ impl MainState {
     }
 
     pub fn clear_dead_stuff(&mut self) {
-        let mut removals = self
-            .system
-            .components_ref::<ShotLifetime>()
-            .filter(|(_, shot)| shot.time <= 0.0)
-            .map(|(id, _)| self.system.get_parent(id).unwrap())
-            .collect::<Vec<_>>();
-
-        removals.extend(
+        let mut removals =
             self.system
                 .components_ref::<Health>()
                 .filter(|(id, actor)| {
                     self.system.get_parent(*id).unwrap() != self.player && actor.health <= 0.0
                 }).map(|(id, _)| self.system.get_parent(id).unwrap())
-                .collect::<Vec<_>>(),
+                .collect::<Vec<_>>();
+
+        let score_increase = removals.len() as Score;
+        if score_increase != 0 {
+            self.score += score_increase;
+            self.gui_dirty = true;
+        }
+
+        removals.extend(
+            self.system
+            .components_ref::<ShotLifetime>()
+            .filter(|(_, shot)| shot.time <= 0.0)
+            .map(|(id, _)| self.system.get_parent(id).unwrap())
+            .collect::<Vec<_>>()
         );
 
         for id in removals {
             self.system.remove_entity(id).unwrap();
-        }
-    }
-
-    pub fn handle_collisions(&mut self) {
-        for rock in self.system.entities_with::<Rock>() {
-            let rock_transform: Transform = self.system.get(rock).unwrap();
-            let rock_bbox: BoundingBox = self.system.get(rock).unwrap();
-            let player_transform: Transform = self.system.get(self.player).unwrap();
-            let player_bbox: BoundingBox = self.system.get(self.player).unwrap();
-
-            let pdistance = rock_transform.pos - player_transform.pos;
-            if pdistance.norm() < (player_bbox.bbox_size + rock_bbox.bbox_size) {
-                self.system
-                    .set(self.player, Health { health: 0.0 })
-                    .unwrap();
-            }
-            for shot in self.system.entities_with::<ShotLifetime>() {
-                let shot_transform: Transform = self.system.get(shot).unwrap();
-                let shot_bbox: BoundingBox = self.system.get(shot).unwrap();
-
-                let distance = shot_transform.pos - rock_transform.pos;
-                if distance.norm() < (shot_bbox.bbox_size + rock_bbox.bbox_size) {
-                    self.system.set(shot, ShotLifetime { time: 0.0 }).unwrap();
-                    self.system.set(rock, Health { health: 0.0 }).unwrap();
-                    self.score += 1;
-                    self.gui_dirty = true;
-                    let _ = self.assets.hit_sound.play();
-                }
-            }
         }
     }
 
@@ -204,7 +183,10 @@ impl EventHandler for MainState {
             // collision detection, object death, and if
             // we have killed all the rocks in the level,
             // spawn more of them.
-            self.handle_collisions();
+            self.system.components_ref::<Collider>()
+                .for_each(|(_, collider)| {
+                    collider.check_for_collisions(&self.system, &self.assets);
+                });
 
             self.clear_dead_stuff();
 
@@ -236,14 +218,11 @@ impl EventHandler for MainState {
         graphics::clear(ctx);
 
         // Loop over all objects drawing them...
-        {
-            let coords = (self.screen_width, self.screen_height);
-
-            for (_, sprite) in self.system.components_ref::<Sprite>() {
-                sprite
-                    .draw_actor(&self.assets, ctx, &self.system, coords)
-                    .unwrap();
-            }
+        let coords = (self.screen_width, self.screen_height);
+        for (_, sprite) in self.system.components_ref::<Sprite>() {
+            sprite
+                .draw_actor(&self.assets, ctx, &self.system, coords)
+                .unwrap();
         }
 
         // And draw the GUI elements in the right places.

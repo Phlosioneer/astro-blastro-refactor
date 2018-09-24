@@ -2,7 +2,7 @@ use ggez::graphics::Point2;
 
 use super::better_ecs::{Ecs, EntityId};
 use super::components::{
-    ActorType, BoundingBox, Health, Physics, Player, Rock, ShotLifetime, Sprite, Tag, Transform,
+    ActorType, Collider, BoundingBox, Health, Physics, Player, Rock, ShotLifetime, Sprite, Tag, Transform,
 };
 use super::vec::{random_vec, vec_from_angle};
 use super::MAX_ROCK_VEL;
@@ -41,6 +41,7 @@ pub fn create_rock(system: &mut Ecs) -> EntityId {
         .with1(|transform| BoundingBox::new(ROCK_BBOX, transform))
         .with(Health::new(ROCK_LIFE))
         .with(Rock)
+        .with2(Collider::new)
         .build()
         .unwrap()
 }
