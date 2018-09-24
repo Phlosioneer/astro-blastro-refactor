@@ -13,15 +13,15 @@ working with `ggez`.
 ## Todo List
 
 - [ ] ECS
--- [x] Designed
--- [x] Integrated
--- [x] Mostly documented
--- [ ] Fully documented
+  - [x] Designed
+  - [x] Integrated
+  - [x] Mostly documented
+  - [ ] Fully documented
 - [ ] Event System
--- [ ] Designed
--- [ ] Integrated
--- [ ] Mostly documented
--- [ ] Fully documented
+  - [ ] Designed
+  - [ ] Integrated
+  - [ ] Mostly documented
+  - [ ] Fully documented
 
 ## The ECS
 
