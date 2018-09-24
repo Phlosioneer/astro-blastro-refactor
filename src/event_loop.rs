@@ -3,24 +3,104 @@ use ggez::graphics::{self, Point2, Vector2};
 use ggez::timer;
 use ggez::{Context, GameResult};
 
-
-use super::better_ecs::{Ecs, EntityId, ComponentId};
+use super::better_ecs::{ComponentId, Ecs, EntityId};
 use super::ActorType;
 use super::MAX_PHYSICS_VEL;
 
 use ggez::nalgebra as na;
 
 use super::{
-    create_player, create_rocks, create_shot, draw_actor, handle_shot_timer, player_handle_input,
-    print_instructions, vec_from_angle, Assets,
-    InputState, PLAYER_SHOT_TIME, SHOT_SPEED,
+    create_player, create_rocks, create_shot, draw_actor, print_instructions, vec_from_angle,
+    Assets, InputState, SHOT_SPEED,
 };
 
 // Components.
 #[derive(Clone)]
+pub struct Player {
+    pub player_shot_timeout: f32,
+    pub transform: ComponentId,
+    pub physics: ComponentId,
+}
+
+// Acceleration in pixels per second.
+pub const PLAYER_THRUST: f32 = 100.0;
+// Rotation in radians per second.
+pub const PLAYER_TURN_RATE: f32 = 3.0;
+// Seconds between shots
+pub const PLAYER_SHOT_TIME: f32 = 0.5;
+
+impl Player {
+    pub fn new(transform: ComponentId, physics: ComponentId) -> Self {
+        Player {
+            player_shot_timeout: PLAYER_SHOT_TIME,
+            transform,
+            physics,
+        }
+    }
+
+    pub fn player_handle_input(&mut self, system: &Ecs, input: &InputState, dt: f32) {
+        let mut transform = system
+            .borrow_mut_by_id::<Transform>(self.transform)
+            .unwrap();
+
+        transform.facing += dt * PLAYER_TURN_RATE * input.xaxis;
+
+        drop(transform);
+
+        if input.yaxis > 0.0 {
+            self.player_thrust(system, dt);
+        }
+    }
+
+    pub fn player_thrust(&mut self, system: &Ecs, dt: f32) {
+        let transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
+        let mut physics = system.borrow_mut_by_id::<Physics>(self.physics).unwrap();
+        let direction_vector = vec_from_angle(transform.facing);
+        let thrust_vector = direction_vector * (PLAYER_THRUST);
+        physics.velocity += thrust_vector * (dt);
+    }
+
+    pub fn try_fire(
+        &mut self,
+        system: &Ecs,
+        new_shots_ecs: &mut Ecs,
+        input: &InputState,
+        assets: &Assets,
+        dt: f32,
+    ) {
+        self.player_shot_timeout -= dt;
+        if input.fire && self.player_shot_timeout < 0.0 {
+            self.fire_player_shot(system, new_shots_ecs, assets);
+        }
+    }
+
+    pub fn fire_player_shot(&mut self, system: &Ecs, new_shots_ecs: &mut Ecs, assets: &Assets) {
+        self.player_shot_timeout = PLAYER_SHOT_TIME;
+
+        let shot = create_shot(new_shots_ecs);
+        let mut shot_transform = new_shots_ecs.borrow_mut::<Transform>(shot).unwrap();
+        let mut shot_physics = new_shots_ecs.borrow_mut::<Physics>(shot).unwrap();
+
+        let player_transform = system.borrow_by_id::<Transform>(self.transform).unwrap();
+        shot_transform.pos = player_transform.pos;
+        shot_transform.facing = player_transform.facing;
+        let direction = vec_from_angle(shot_transform.facing);
+
+        shot_physics.velocity.x = SHOT_SPEED * direction.x;
+        shot_physics.velocity.y = SHOT_SPEED * direction.y;
+
+        // TODO: self.shots.push(shot);
+        assets.shot_sound.play().unwrap();
+    }
+}
+
+#[derive(Clone)]
 pub struct Tag {
     pub tag: ActorType,
 }
+
+#[derive(Clone)]
+pub struct Rock;
 
 #[derive(Clone)]
 pub struct Transform {
@@ -32,7 +112,7 @@ impl Default for Transform {
     fn default() -> Self {
         Transform {
             pos: Point2::origin(),
-            facing: 0.0
+            facing: 0.0,
         }
     }
 }
@@ -42,7 +122,7 @@ pub struct Physics {
     pub velocity: Vector2,
     pub ang_vel: f32,
 
-    pub transform: ComponentId
+    pub transform: ComponentId,
 }
 
 impl Physics {
@@ -50,12 +130,14 @@ impl Physics {
         Physics {
             velocity: na::zero(),
             ang_vel: 0.0,
-            transform
+            transform,
         }
     }
 
     pub fn update_actor_position(&mut self, system: &Ecs, dt: f32) {
-        let mut transform = system.borrow_mut_by_id::<Transform>(self.transform).unwrap();
+        let mut transform = system
+            .borrow_mut_by_id::<Transform>(self.transform)
+            .unwrap();
 
         // Clamp the velocity to the max efficiently
         let norm_sq = self.velocity.norm_squared();
@@ -71,7 +153,9 @@ impl Physics {
     /// screen, so if it goes off the left side of the screen it
     /// will re-enter on the right side and so on.
     pub fn wrap_actor_position(&mut self, system: &Ecs, sx: f32, sy: f32) {
-        let mut transform = system.borrow_mut_by_id::<Transform>(self.transform).unwrap();
+        let mut transform = system
+            .borrow_mut_by_id::<Transform>(self.transform)
+            .unwrap();
 
         // Wrap screen
         let screen_x_bounds = sx / 2.0;
@@ -93,14 +177,14 @@ impl Physics {
 pub struct BoundingBox {
     pub bbox_size: f32,
 
-    pub transform: ComponentId
+    pub transform: ComponentId,
 }
 
 impl BoundingBox {
     pub fn new(bbox_size: f32, transform: ComponentId) -> Self {
         BoundingBox {
             bbox_size,
-            transform
+            transform,
         }
     }
 }
@@ -113,6 +197,12 @@ pub struct Health {
 #[derive(Clone)]
 pub struct ShotLifetime {
     pub time: f32,
+}
+
+impl ShotLifetime {
+    pub fn handle_shot_timer(&mut self, dt: f32) {
+        self.time -= dt;
+    }
 }
 
 /// **********************************************************************
@@ -128,15 +218,12 @@ pub struct ShotLifetime {
 
 pub struct MainState {
     player: EntityId,
-    shots: Vec<EntityId>,
-    rocks: Vec<EntityId>,
     level: i32,
     score: i32,
     assets: Assets,
     screen_width: u32,
     screen_height: u32,
     input: InputState,
-    player_shot_timeout: f32,
     gui_dirty: bool,
     score_display: graphics::Text,
     level_display: graphics::Text,
@@ -161,19 +248,16 @@ impl MainState {
 
         let player = create_player(&mut entity_system);
         let player_transform: Transform = entity_system.get(player).unwrap();
-        let rocks = create_rocks(&mut entity_system, 5, player_transform.pos, 100.0, 250.0);
+        create_rocks(&mut entity_system, 5, player_transform.pos, 100.0, 250.0);
 
         let s = MainState {
             player,
-            shots: Vec::new(),
-            rocks,
             level: 0,
             score: 0,
             assets,
             screen_width: ctx.conf.window_mode.width,
             screen_height: ctx.conf.window_mode.height,
             input: InputState::default(),
-            player_shot_timeout: 0.0,
             gui_dirty: true,
             score_display: score_disp,
             level_display: level_disp,
@@ -184,45 +268,30 @@ impl MainState {
         Ok(s)
     }
 
-    pub fn fire_player_shot(&mut self) {
-        self.player_shot_timeout = PLAYER_SHOT_TIME;
-
-        let shot = create_shot(&mut self.system);
-
-        let player_transform: Transform = self.system.get(self.player).unwrap();
-        let direction;
-        {
-            let mut shot_transform = self.system.borrow_mut::<Transform>(shot).unwrap();
-            shot_transform.pos = player_transform.pos;
-            shot_transform.facing = player_transform.facing;
-            direction = vec_from_angle(shot_transform.facing);
-        }
-
-        {
-            let mut shot_physics = self.system.borrow_mut::<Physics>(shot).unwrap();
-            shot_physics.velocity.x = SHOT_SPEED * direction.x;
-            shot_physics.velocity.y = SHOT_SPEED * direction.y;
-        }
-
-        self.shots.push(shot);
-        let _ = self.assets.shot_sound.play();
-    }
-
     pub fn clear_dead_stuff(&mut self) {
-        let mut shots = Vec::with_capacity(0);
-        let mut rocks = Vec::with_capacity(0);
-        std::mem::swap(&mut self.shots, &mut shots);
-        std::mem::swap(&mut self.rocks, &mut rocks);
+        let mut removals = self
+            .system
+            .components_ref::<ShotLifetime>()
+            .filter(|(_, shot)| shot.time <= 0.0)
+            .map(|(id, _)| self.system.get_parent(id).unwrap())
+            .collect::<Vec<_>>();
 
-        shots.retain(|&s| self.system.get::<ShotLifetime>(s).unwrap().time > 0.0);
-        rocks.retain(|&r| self.system.get::<Health>(r).unwrap().health > 0.0);
+        removals.extend(
+            self.system
+                .components_ref::<Health>()
+                .filter(|(id, actor)| {
+                    self.system.get_parent(*id).unwrap() != self.player && actor.health <= 0.0
+                }).map(|(id, _)| self.system.get_parent(id).unwrap())
+                .collect::<Vec<_>>(),
+        );
 
-        self.shots = shots;
-        self.rocks = rocks;
+        for id in removals {
+            self.system.remove_entity(id).unwrap();
+        }
     }
 
     pub fn handle_collisions(&mut self) {
-        for &rock in &self.rocks {
+        for rock in self.system.entities_with::<Rock>() {
             let rock_transform: Transform = self.system.get(rock).unwrap();
             let rock_bbox: BoundingBox = self.system.get(rock).unwrap();
             let player_transform: Transform = self.system.get(self.player).unwrap();
@@ -234,7 +303,7 @@ impl MainState {
                     .set(self.player, Health { health: 0.0 })
                     .unwrap();
             }
-            for &shot in &self.shots {
+            for shot in self.system.entities_with::<ShotLifetime>() {
                 let shot_transform: Transform = self.system.get(shot).unwrap();
                 let shot_bbox: BoundingBox = self.system.get(shot).unwrap();
 
@@ -251,19 +320,18 @@ impl MainState {
     }
 
     pub fn check_for_level_respawn(&mut self) {
-        if self.rocks.is_empty() {
+        if self.system.entities_with::<Rock>().is_empty() {
             let transform: Transform = self.system.get(self.player).unwrap();
 
             self.level += 1;
             self.gui_dirty = true;
-            let r = create_rocks(
+            create_rocks(
                 &mut self.system,
                 self.level + 5,
                 transform.pos,
                 100.0,
                 250.0,
             );
-            self.rocks.extend(r);
         }
     }
 
@@ -291,25 +359,39 @@ impl EventHandler for MainState {
             let seconds = 1.0 / (DESIRED_FPS as f32);
 
             // Update the player state based on the user input.
-            player_handle_input(&mut self.system, self.player, &self.input, seconds);
-            self.player_shot_timeout -= seconds;
-            if self.input.fire && self.player_shot_timeout < 0.0 {
-                self.fire_player_shot();
-            }
+            let mut new_shots = Ecs::empty();
+            self.system
+                .components_mut::<Player>()
+                .for_each(|(_, mut player)| {
+                    player.player_handle_input(&self.system, &self.input, seconds);
+                    player.try_fire(
+                        &self.system,
+                        &mut new_shots,
+                        &self.input,
+                        &self.assets,
+                        seconds,
+                    );
+                });
+            self.system.merge(new_shots);
 
             // Update the physics for all actors.
-            self.system.components_mut::<Physics>().for_each(|mut component| {
-                component.update_actor_position(&self.system, seconds);
-                component.wrap_actor_position(
-                    &self.system,
-                    self.screen_width as f32,
-                    self.screen_height as f32,
-                )
-            });
+            self.system
+                .components_mut::<Physics>()
+                .for_each(|(_, mut component)| {
+                    component.update_actor_position(&self.system, seconds);
+                    component.wrap_actor_position(
+                        &self.system,
+                        self.screen_width as f32,
+                        self.screen_height as f32,
+                    )
+                });
 
-            for &act in &self.shots {
-                handle_shot_timer(&mut self.system, act, seconds);
-            }
+            // Update the timers for shots.
+            self.system
+                .components_mut::<ShotLifetime>()
+                .for_each(|(_, mut shot)| {
+                    shot.handle_shot_timer(seconds);
+                });
 
             // Handle the results of things moving:
             // collision detection, object death, and if
@@ -348,17 +430,16 @@ impl EventHandler for MainState {
 
         // Loop over all objects drawing them...
         {
-            let assets = &mut self.assets;
             let coords = (self.screen_width, self.screen_height);
 
-            draw_actor(assets, ctx, &mut self.system, self.player, coords)?;
+            draw_actor(&mut self.assets, ctx, &mut self.system, self.player, coords)?;
 
-            for &s in &self.shots {
-                draw_actor(assets, ctx, &mut self.system, s, coords)?;
+            for s in self.system.entities_with::<ShotLifetime>() {
+                draw_actor(&mut self.assets, ctx, &mut self.system, s, coords)?;
             }
 
-            for &r in &self.rocks {
-                draw_actor(assets, ctx, &mut self.system, r, coords)?;
+            for r in self.system.entities_with::<Rock>() {
+                draw_actor(&mut self.assets, ctx, &mut self.system, r, coords)?;
             }
         }
 

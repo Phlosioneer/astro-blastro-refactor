@@ -2,7 +2,8 @@
 //! The idea is that this game is simple but still
 //! non-trivial enough to be interesting.
 
-
+#[macro_use]
+extern crate lazy_static;
 extern crate ggez;
 extern crate rand;
 //extern crate recs;
@@ -21,13 +22,14 @@ use std::path;
 
 mod better_ecs;
 mod event_loop;
-mod vec;
 mod util;
+mod vec;
 use self::better_ecs::{Ecs, EntityId};
 
-use self::event_loop::{BoundingBox, Health, MainState, Physics, ShotLifetime, Tag, Transform};
+use self::event_loop::{
+    BoundingBox, Health, MainState, Physics, Player, Rock, ShotLifetime, Tag, Transform,
+};
 use self::vec::{random_vec, vec_from_angle};
-
 
 pub const MAX_PHYSICS_VEL: f32 = 250.0;
 
@@ -70,23 +72,13 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    let transform = system
-        .set(
-            actor,
-            Transform::default()
-        ).unwrap();
+    let transform = system.set(actor, Transform::default()).unwrap();
+
+    let physics = system.set(actor, Physics::new(transform)).unwrap();
 
     system
-        .set(
-            actor,
-            Physics::new(transform),
-        ).unwrap();
-
-    system
-        .set(
-            actor,
-            BoundingBox::new(PLAYER_BBOX, transform),
-        ).unwrap();
+        .set(actor, BoundingBox::new(PLAYER_BBOX, transform))
+        .unwrap();
 
     system
         .set(
@@ -95,6 +87,8 @@ pub fn create_player(system: &mut Ecs) -> EntityId {
                 health: PLAYER_LIFE,
             },
         ).unwrap();
+
+    system.set(actor, Player::new(transform, physics)).unwrap();
 
     actor
 }
@@ -110,23 +104,15 @@ pub fn create_rock(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    let transform = system
-        .set(
-            actor,
-            Transform::default(),
-        ).unwrap();
+    system.set(actor, Rock).unwrap();
+
+    let transform = system.set(actor, Transform::default()).unwrap();
+
+    system.set(actor, Physics::new(transform)).unwrap();
 
     system
-        .set(
-            actor,
-            Physics::new(transform),
-        ).unwrap();
-
-    system
-        .set(
-            actor,
-            BoundingBox::new(ROCK_BBOX, transform),
-        ).unwrap();
+        .set(actor, BoundingBox::new(ROCK_BBOX, transform))
+        .unwrap();
 
     system.set(actor, Health { health: ROCK_LIFE }).unwrap();
 
@@ -144,23 +130,13 @@ pub fn create_shot(system: &mut Ecs) -> EntityId {
             },
         ).unwrap();
 
-    let transform = system
-        .set(
-            actor,
-            Transform::default(),
-        ).unwrap();
+    let transform = system.set(actor, Transform::default()).unwrap();
+
+    system.set(actor, Physics::new(transform)).unwrap();
 
     system
-        .set(
-            actor,
-            Physics::new(transform),
-        ).unwrap();
-
-    system
-        .set(
-            actor,
-            BoundingBox::new(SHOT_BBOX, transform),
-        ).unwrap();
+        .set(actor, BoundingBox::new(SHOT_BBOX, transform))
+        .unwrap();
 
     system.set(actor, ShotLifetime { time: SHOT_LIFE }).unwrap();
 
@@ -209,41 +185,6 @@ pub fn create_rocks(
 
 pub const SHOT_SPEED: f32 = 200.0;
 pub const SHOT_ANG_VEL: f32 = 0.1;
-
-// Acceleration in pixels per second.
-pub const PLAYER_THRUST: f32 = 100.0;
-// Rotation in radians per second.
-pub const PLAYER_TURN_RATE: f32 = 3.0;
-// Seconds between shots
-pub const PLAYER_SHOT_TIME: f32 = 0.5;
-
-pub fn player_handle_input(system: &mut Ecs, actor: EntityId, input: &InputState, dt: f32) {
-    let mut transform: Transform = system.get(actor).unwrap();
-    let mut physics: Physics = system.get(actor).unwrap();
-
-    transform.facing += dt * PLAYER_TURN_RATE * input.xaxis;
-
-    if input.yaxis > 0.0 {
-        player_thrust(&mut transform, &mut physics, dt);
-    }
-
-    system.set(actor, transform).unwrap();
-    system.set(actor, physics).unwrap();
-}
-
-pub fn player_thrust(transform: &mut Transform, physics: &mut Physics, dt: f32) {
-    let direction_vector = vec_from_angle(transform.facing);
-    let thrust_vector = direction_vector * (PLAYER_THRUST);
-    physics.velocity += thrust_vector * (dt);
-}
-
-
-
-
-pub fn handle_shot_timer(system: &mut Ecs, actor: EntityId, dt: f32) {
-    let mut lifetime = system.borrow_mut::<ShotLifetime>(actor).unwrap();
-    lifetime.time -= dt;
-}
 
 /// Translates the world coordinate system, which
 /// has Y pointing up and the origin at the center,

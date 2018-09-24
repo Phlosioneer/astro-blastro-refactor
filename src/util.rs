@@ -1,6 +1,5 @@
-
-use std::mem;
 use std::cell::RefCell;
+use std::mem;
 
 ///////////////////////////////////////////////////////////////////////////////////
 // This is a proposed addition to RefCell; for now, I've written an extension trait
@@ -12,10 +11,14 @@ pub trait RefCellTryReplaceExt<T> {
 }
 
 /// An error returned by [`RefCell::try_replace`](struct.RefCell.html#method.try_replace).
-pub struct ReplaceError { _private: () }
+pub struct ReplaceError {
+    _private: (),
+}
 
 /// An error returned by [`RefCell::try_swap`](struct.RefCell.html#method.try_swap).
-pub struct SwapError { _private: () }
+pub struct SwapError {
+    _private: (),
+}
 
 impl<T> RefCellTryReplaceExt<T> for RefCell<T> {
     /// Replaces the wrapped value with a new one, returning the old value,
@@ -29,10 +32,9 @@ impl<T> RefCellTryReplaceExt<T> for RefCell<T> {
     fn try_replace(&self, t: T) -> Result<T, ReplaceError> {
         match self.try_borrow_mut() {
             Ok(mut b) => Ok(mem::replace(&mut *b, t)),
-            Err(_) => Err(ReplaceError { _private: () })
+            Err(_) => Err(ReplaceError { _private: () }),
         }
     }
-
 
     /// Swaps the wrapped value of `self` with the wrapped value of `other`,
     /// without deinitializing either one. Returns an error if either value is
@@ -47,8 +49,8 @@ impl<T> RefCellTryReplaceExt<T> for RefCell<T> {
             (Ok(mut s), Ok(mut o)) => {
                 mem::swap(&mut *s, &mut *o);
                 Ok(())
-            },
-            _ => Err(SwapError { _private: () })
+            }
+            _ => Err(SwapError { _private: () }),
         }
     }
 }

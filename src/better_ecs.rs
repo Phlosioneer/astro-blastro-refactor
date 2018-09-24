@@ -3,31 +3,54 @@
 
 ///! This library is heavily based on Rustic Ecs ("Recs"), go there if
 ///! documentation here is lacking: https://github.com/AndyBarron/rustic-ecs
-
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 use std::cell::{self, RefCell};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Mutex;
 
 use super::util::RefCellTryReplaceExt;
 
+lazy_static! {
+    static ref NEXT_ECS_ID: Mutex<IdNumber> = Mutex::new(0);
+}
+
 type IdNumber = u64;
 type ComponentMap = HashMap<TypeId, ComponentId>;
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct EcsId(IdNumber);
+
+impl EcsId {
+    pub fn new() -> Self {
+        let mut next_id_lock = NEXT_ECS_ID.lock().unwrap();
+        let id = *next_id_lock;
+        *next_id_lock = next_id_lock.wrapping_add(1);
+
+        EcsId(id)
+    }
+}
 
 /// A unique ID tag for an entity in an Ecs system.
 ///
 /// There is a static guarantee that no two entities in the same Ecs will
 /// ever share an EntityId, including deleted entities.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct EntityId(IdNumber);
+pub struct EntityId(EcsId, IdNumber);
 
 /// A unique ID tag for a component in an Ecs system.
 ///
 /// There is a static guarantee that no two components in the same Ecs will
 /// ever share a ComponentId, including deleted or replaced components.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct ComponentId(IdNumber);
+pub struct ComponentId(EcsId, IdNumber);
+
+/// A convenient way to store Entities
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct EntityRef {
+    id: EntityId,
+}
 
 /// An error type for the Ecs.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -49,13 +72,13 @@ pub enum EcsError {
 
     /// Some internal error occurred; this indicates that there is a bug
     /// in the library.
-    InternalError(&'static str, Option<Box<EcsError>>)
+    InternalError(&'static str, Option<Box<EcsError>>),
 }
 
 struct ComponentEntry {
     pub refbox: RefCell<Box<Any>>,
     pub parent: EntityId,
-    pub type_id: TypeId
+    pub type_id: TypeId,
 }
 
 impl ComponentEntry {
@@ -63,7 +86,7 @@ impl ComponentEntry {
         ComponentEntry {
             refbox: RefCell::new(Box::new(component)),
             parent,
-            type_id: TypeId::of::<T>()
+            type_id: TypeId::of::<T>(),
         }
     }
 }
@@ -71,6 +94,9 @@ impl ComponentEntry {
 /// The Entity Component System object. It contains all entities and
 /// components.
 pub struct Ecs {
+    // The id for this ECS.
+    ecs_id: EcsId,
+
     /// The next free EntityId number.
     next_entity_id: IdNumber,
 
@@ -89,16 +115,120 @@ pub trait Component: 'static {}
 
 impl<T: 'static> Component for T {}
 
-
 impl Ecs {
-    /// Create a new, empty Ecs.
+    /// Create a new Ecs.
     pub fn new() -> Self {
         Ecs {
+            ecs_id: EcsId::new(),
             next_entity_id: 0,
             next_component_id: 0,
             entities: HashMap::new(),
             components: HashMap::new(),
         }
+    }
+
+    /// Create a new Ecs with no allocations. Useful when paired with the
+    /// Ecs::merge function.
+    pub fn empty() -> Self {
+        Ecs {
+            ecs_id: EcsId::new(),
+            next_entity_id: 0,
+            next_component_id: 0,
+            entities: HashMap::with_capacity(0),
+            components: HashMap::with_capacity(0),
+        }
+    }
+
+    /// Merge two Ecs instances together.
+    ///
+    /// This is particularly useful when a component being called through
+    /// Ecs::components_ref or Ecs::components_mut needs to add a new entity
+    /// to the system. Instead, you can create a new, empty Ecs, pass it by
+    /// mutable reference, then merge it with the old one outside of the iterator.
+    ///
+    /// Merging an Ecs that is empty is free.
+    pub fn merge(&mut self, other: Ecs) {
+        if other.entities.len() == 0 {
+            return;
+        }
+        println!("Merging...");
+
+        self.components.extend(other.components);
+        self.entities.extend(other.entities);
+
+        /*
+        for (old_id, component_data) in other_components {
+            let new_id = self.create_component_id().unwrap();
+            old_to_new_map.insert(old_id, new_id);
+
+            // Note: parent references are broken!
+            self.components.insert(new_id, component_data);
+        }
+
+        println!("Old->New: {:?}", old_to_new_map);
+
+        for (old_id, attached_components) in other_entities {
+            let new_id = self.create_entity_id().unwrap();
+            println!("Entity: Old->New: {:?} -> {:?}", old_id, new_id);
+            let new_attached_components: HashMap<_, _> = attached_components.into_iter()
+                .map(|(type_id, old_component_id)| (type_id, *old_to_new_map.get(&old_component_id).unwrap()))
+                .collect();
+            println!("Components: {:?}", new_attached_components);
+            for &component in new_attached_components.values() {
+                self.components.get_mut(&component).unwrap().parent = new_id;
+            }
+            self.entities.insert(new_id, new_attached_components);
+        }
+
+        // Ensure no foreign ID's are left.
+        assert_eq!(self.components.keys()
+            .filter(|&ComponentId(ecs_id, _)| self.ecs_id != *ecs_id)
+            .map(|&id| id)
+            .collect::<Vec<_>>(), Vec::new());
+        assert_eq!(self.entities.keys()
+            .filter(|&EntityId(ecs_id, _)| self.ecs_id != *ecs_id)
+            .map(|&id| id)
+            .collect::<Vec<_>>(), Vec::new());
+        assert_eq!(self.components.values()
+            .map(|data| data.parent)
+            .filter(|EntityId(ecs_id, _)| self.ecs_id != *ecs_id)
+            .collect::<Vec<_>>(), Vec::new());
+        assert_eq!(self.entities.values()
+            .flat_map(|map| map.values().map(|&id| id))
+            .filter(|ComponentId(ecs_id, _)| self.ecs_id != *ecs_id)
+            .collect::<Vec<_>>(), Vec::new());
+
+        // Ensure that each component's parent field is valid.
+        assert_eq!(self.components.iter()
+            .map(|(id, data)| (*id, data.parent))
+            .filter(|(comp_id, parent_id)| self.entities.get(&parent_id)
+                .unwrap()
+                .values()
+                .find(|&v| v == comp_id)
+                .is_none())
+            .collect::<Vec<_>>(), Vec::new());
+        
+        // Ensure that each entity's components are valid.
+        assert_eq!(self.entities.iter()
+            .map(|(parent_id, attached)| (parent_id, attached.values()
+                .map(|comp_id| (comp_id, self.components.get(comp_id)
+                    .map(|data| data.parent == *parent_id)))
+                .filter(|(_, res)| *res != Some(true))
+                .collect::<Vec<_>>()))
+            .filter(|(_, results_vec)| *results_vec != Vec::new())
+            .collect::<Vec<_>>(), Vec::new());*/
+    }
+
+    fn create_entity_id(&mut self) -> Option<EntityId> {
+        let new_id_number = self.next_entity_id;
+        self.next_entity_id = self.next_entity_id.checked_add(1)?;
+        Some(EntityId(self.ecs_id, new_id_number))
+    }
+
+    fn create_component_id(&mut self) -> Option<ComponentId> {
+        let new_id_number = self.next_component_id;
+        self.next_component_id = self.next_component_id.checked_add(1)?;
+        Some(ComponentId(self.ecs_id, new_id_number))
     }
 
     /// Create an entity, or return `None` if no more `EntityIds` can be
@@ -109,9 +239,7 @@ impl Ecs {
     ///
     /// This is the non-panicking variant of `create_entity`.
     pub fn try_create_entity(&mut self) -> Option<EntityId> {
-        let new_id_number = self.next_entity_id;
-        self.next_entity_id = self.next_entity_id.checked_add(1)?;
-        let new_id = EntityId(new_id_number);
+        let new_id = self.create_entity_id()?;
 
         self.entities.insert(new_id, HashMap::new());
 
@@ -132,9 +260,8 @@ impl Ecs {
 
     // Note: Does not touch the entities map.
     fn create_component<T: Component>(&mut self, component: T, parent: EntityId) -> ComponentId {
-        let new_id_number = self.next_component_id;
-        self.next_component_id = self.next_component_id.checked_add(1).unwrap();
-        let new_id = ComponentId(new_id_number);
+        // TODO: Unwrap
+        let new_id = self.create_component_id().unwrap();
 
         self.components
             .insert(new_id, ComponentEntry::new(component, parent));
@@ -152,7 +279,10 @@ impl Ecs {
 
         // Remove all the components attached to the entity.
         for (_, id) in components {
-            self.components.remove(&id).ok_or(EcsError::InternalError("Failed to remove component attached to an entity.", None))?;
+            self.components.remove(&id).ok_or(EcsError::InternalError(
+                "Failed to remove component attached to an entity.",
+                None,
+            ))?;
         }
 
         Ok(())
@@ -179,12 +309,17 @@ impl Ecs {
 
     /// Checks if `entity` has a component of the specified type attached
     /// to it. If it does, it returns the component's ID; None otherwise.
-    /// 
+    ///
     /// Returns an error if `entity` doesn't exist.
     ///
     /// See also `Ecs::lookup_component`.
-    pub fn has_component<T: Component>(&self, entity: EntityId) -> Result<Option<ComponentId>, EcsError> {
-        let components = self.entities.get(&entity)
+    pub fn has_component<T: Component>(
+        &self,
+        entity: EntityId,
+    ) -> Result<Option<ComponentId>, EcsError> {
+        let components = self
+            .entities
+            .get(&entity)
             .ok_or(EcsError::EntityNotFound(entity))?;
         Ok(components.get(&TypeId::of::<T>()).map(|&id| id))
     }
@@ -193,42 +328,66 @@ impl Ecs {
     /// doesn't have a matching component, an error is returned.
     ///
     /// See also `Ecs::has_component`.
-    pub fn lookup_component<T: Component>(&self, entity: EntityId) -> Result<ComponentId, EcsError> {
-        self.has_component::<T>(entity).and_then(|opt| opt.ok_or(EcsError::ComponentTypeNotFound(entity)))
+    pub fn lookup_component<T: Component>(
+        &self,
+        entity: EntityId,
+    ) -> Result<ComponentId, EcsError> {
+        self.has_component::<T>(entity)
+            .and_then(|opt| opt.ok_or(EcsError::ComponentTypeNotFound(entity)))
     }
 
     /// Returns the ID of the entity that `component` is attached to.
     pub fn get_parent(&self, component: ComponentId) -> Result<EntityId, EcsError> {
-        self.components.get(&component)
+        self.components
+            .get(&component)
             .ok_or(EcsError::ComponentNotFound(component))
             .map(|data| data.parent)
     }
 
     /// Returns true if `component` is attached to `entity`. Returns an error if
     /// the component or the entity don't exist.
-    pub fn is_component_attached(&self, entity: EntityId, component: ComponentId) -> Result<bool, EcsError> {
-        let components = self.entities.get(&entity)
+    pub fn is_component_attached(
+        &self,
+        entity: EntityId,
+        component: ComponentId,
+    ) -> Result<bool, EcsError> {
+        let components = self
+            .entities
+            .get(&entity)
             .ok_or(EcsError::EntityNotFound(entity))?;
         Ok(components.iter().filter(|(_, &id)| id == component).count() > 0)
     }
 
     /// Returns true if `component` is the specified type; false otherwise. Returns
     /// an error if the component doesn't exist.
-    pub fn component_is_type<T: Component>(&self, component: ComponentId) -> Result<bool, EcsError> {
-        let component_data = self.components.get(&component).ok_or(EcsError::ComponentNotFound(component))?;
+    pub fn component_is_type<T: Component>(
+        &self,
+        component: ComponentId,
+    ) -> Result<bool, EcsError> {
+        let component_data = self
+            .components
+            .get(&component)
+            .ok_or(EcsError::ComponentNotFound(component))?;
         Ok(component_data.type_id == TypeId::of::<T>())
     }
 
     // Note: This will force the new component to have a different EntityId than the old one.
-    fn create_and_attach_component<T: Component>(&mut self, entity: EntityId, component: T) -> Result<ComponentId, EcsError> {
+    fn create_and_attach_component<T: Component>(
+        &mut self,
+        entity: EntityId,
+        component: T,
+    ) -> Result<ComponentId, EcsError> {
         let component_id = self.create_component(component, entity);
-        let entity_components = self.entities.get_mut(&entity)
+        let entity_components = self
+            .entities
+            .get_mut(&entity)
             .ok_or(EcsError::EntityNotFound(entity))?;
 
         let maybe_old_id = entity_components.insert(TypeId::of::<T>(), component_id);
         if let Some(old_id) = maybe_old_id {
-            self.remove_component(old_id)
-                .map_err(|e| EcsError::InternalError("Failed to remove old component.", Some(Box::new(e))))?;
+            self.remove_component(old_id).map_err(|e| {
+                EcsError::InternalError("Failed to remove old component.", Some(Box::new(e)))
+            })?;
         }
 
         Ok(component_id)
@@ -250,7 +409,11 @@ impl Ecs {
     /// exist, or if the type `T` is incorrect.
     ///
     /// If successful, the replaced component is returned.
-    pub fn replace_by_id<T: Component>(&self, component_id: ComponentId, component: T) -> Result<T, EcsError> {
+    pub fn replace_by_id<T: Component>(
+        &self,
+        component_id: ComponentId,
+        component: T,
+    ) -> Result<T, EcsError> {
         if self.component_is_type::<T>(component_id)? {
             self.replace_by_id_unchecked(component_id, component)
         } else {
@@ -258,13 +421,22 @@ impl Ecs {
         }
     }
 
-    fn replace_by_id_unchecked<T: Component>(&self, component_id: ComponentId, component: T) -> Result<T, EcsError> {
-        let boxed_any = self.get_refcell(component_id)?.try_replace(Box::new(component))
+    fn replace_by_id_unchecked<T: Component>(
+        &self,
+        component_id: ComponentId,
+        component: T,
+    ) -> Result<T, EcsError> {
+        let boxed_any = self
+            .get_refcell(component_id)?
+            .try_replace(Box::new(component))
             .map_err(|_| EcsError::BorrowError(component_id))?;
 
-        boxed_any.downcast::<T>()
+        boxed_any
+            .downcast::<T>()
             .map(|boxed_t| *boxed_t)
-            .map_err(|_| panic!("Typecheck succeded and then failed! Ecs left in inconsistent state!"))
+            .map_err(|_| {
+                panic!("Typecheck succeded and then failed! Ecs left in inconsistent state!")
+            })
     }
 
     /// Set the component on `entity` for type `T` to `component`. If `entity` doesn't
@@ -276,26 +448,31 @@ impl Ecs {
         entity: EntityId,
         component: T,
     ) -> Result<ComponentId, EcsError> {
-        
         match self.has_component::<T>(entity)? {
             Some(component_id) => {
                 // Update that component.
-                self.replace::<T>(entity, component)
-                    .map(|_| component_id)
-            },
-            None => self.create_and_attach_component(entity, component)
-                .map_err(|e| if let EcsError::EntityNotFound(_) = e {
-                        EcsError::InternalError("Couldn't find entity the 2nd time after finding it the 1st.", Some(Box::new(e)))
+                self.replace::<T>(entity, component).map(|_| component_id)
+            }
+            None => self
+                .create_and_attach_component(entity, component)
+                .map_err(|e| {
+                    if let EcsError::EntityNotFound(_) = e {
+                        EcsError::InternalError(
+                            "Couldn't find entity the 2nd time after finding it the 1st.",
+                            Some(Box::new(e)),
+                        )
                     } else {
                         e
-                    })
+                    }
+                }),
         }
     }
 
     fn get_refcell(&self, id: ComponentId) -> Result<&RefCell<Box<Any>>, EcsError> {
-        self.components.get(&id)
+        self.components
+            .get(&id)
             .map(|v| &v.refbox)
-            .ok_or(EcsError::InternalError("Component attached to entity couldn't be found.", None))
+            .ok_or(EcsError::ComponentNotFound(id))
     }
 
     /// Get a copy of the specified component.
@@ -315,7 +492,9 @@ impl Ecs {
     pub fn borrow<T: Component>(&self, entity: EntityId) -> Result<Ref<T>, EcsError> {
         let id = self.lookup_component::<T>(entity)?;
         let refcell = self.get_refcell(id)?;
-        let refbox = refcell.try_borrow().map_err(|_| EcsError::BorrowError(id))?;
+        let refbox = refcell
+            .try_borrow()
+            .map_err(|_| EcsError::BorrowError(id))?;
         Ref::new(refbox).ok_or(EcsError::ComponentTypeMismatch(id))
     }
 
@@ -328,8 +507,10 @@ impl Ecs {
     /// Returns and error if a mutable or immutable borrow of this component already exists.
     pub fn borrow_mut<T: Component>(&self, entity: EntityId) -> Result<RefMut<T>, EcsError> {
         let id = self.lookup_component::<T>(entity)?;
-        let refcell = self.get_refcell(id)?;        
-        let refbox = refcell.try_borrow_mut().map_err(|_| EcsError::BorrowError(id))?;
+        let refcell = self.get_refcell(id)?;
+        let refbox = refcell
+            .try_borrow_mut()
+            .map_err(|_| EcsError::BorrowError(id))?;
         RefMut::new(refbox).ok_or(EcsError::ComponentTypeMismatch(id))
     }
 
@@ -350,11 +531,17 @@ impl Ecs {
     /// same time.
     ///
     /// Returns an error if a mutable borrow of this component already exists.
-    pub fn borrow_by_id<T: Component>(&self, component_id: ComponentId) -> Result<Ref<T>, EcsError> {
+    pub fn borrow_by_id<T: Component>(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<Ref<T>, EcsError> {
         let component = self.get_refcell(component_id)?;
 
-        Ref::new(component.try_borrow().map_err(|_| EcsError::BorrowError(component_id))?)
-            .ok_or(EcsError::ComponentTypeMismatch(component_id))
+        Ref::new(
+            component
+                .try_borrow()
+                .map_err(|_| EcsError::BorrowError(component_id))?,
+        ).ok_or(EcsError::ComponentTypeMismatch(component_id))
     }
 
     /// Get a mutable borrow of the specified component.
@@ -370,8 +557,11 @@ impl Ecs {
     ) -> Result<RefMut<T>, EcsError> {
         let component = self.get_refcell(component_id)?;
 
-        RefMut::new(component.try_borrow_mut().map_err(|_| EcsError::BorrowError(component_id))?)
-            .ok_or(EcsError::ComponentTypeMismatch(component_id))
+        RefMut::new(
+            component
+                .try_borrow_mut()
+                .map_err(|_| EcsError::BorrowError(component_id))?,
+        ).ok_or(EcsError::ComponentTypeMismatch(component_id))
     }
 
     /// Collect all entity IDs into a vector.
@@ -381,11 +571,11 @@ impl Ecs {
     }
 
     /// Iterator over all components of a specific type.
-    pub fn components<'a, T: Component>(&'a self) -> impl Iterator<Item=ComponentId> + 'a {
-        self.components.iter()
+    pub fn components<'a, T: Component>(&'a self) -> impl Iterator<Item = ComponentId> + 'a {
+        self.components
+            .iter()
             // This filters out everything with the wrong type.
             .filter(|(_, entry)| entry.type_id == TypeId::of::<T>())
-            
             // This gives an iterator over component ids.
             .map(|(&id, _)| id)
     }
@@ -393,40 +583,46 @@ impl Ecs {
     /// Iterator over all components of a specific type, yielding a reference to each.
     /// Note that this will panic when advancing the iterator if the next component is
     /// currently mutably borrowed.
-    pub fn components_ref<'a, T: Component>(&'a self) -> impl Iterator<Item=Ref<'a, T>> {
+    pub fn components_ref<T: Component>(&self) -> impl Iterator<Item = (ComponentId, Ref<T>)> {
         Iter::new(self.components::<T>(), self)
     }
 
-    
     /// Iterator over all components of a specific type, yielding a mutable reference
     /// to each. Note that this will panic when advancing the iterator if the next
     /// component is currently borrowed.
-    pub fn components_mut<T: Component>(&self) -> impl Iterator<Item=RefMut<T>> {
+    pub fn components_mut<T: Component>(&self) -> impl Iterator<Item = (ComponentId, RefMut<T>)> {
         IterMut::new(self.components::<T>(), self)
+    }
+
+    pub fn entities_with<T: Component>(&self) -> Vec<EntityId> {
+        self.components::<T>()
+            .map(|id| self.get_parent(id).unwrap())
+            .collect()
     }
 }
 
-pub struct Iter<'a, I: Iterator<Item=ComponentId>, T: Component> {
+pub struct Iter<'a, I: Iterator<Item = ComponentId>, T: Component> {
     iter: I,
     parent: &'a Ecs,
-    p: PhantomData<T>
+    p: PhantomData<T>,
 }
 
-impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iter<'a, I, T> {
+impl<'a, I: Iterator<Item = ComponentId>, T: Component> Iter<'a, I, T> {
     fn new(iter: I, parent: &'a Ecs) -> Self {
         Iter {
             iter,
             parent,
-            p: PhantomData
+            p: PhantomData,
         }
     }
 }
 
-impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for Iter<'a, I, T> {
-    type Item = Ref<'a, T>;
+impl<'a, I: Iterator<Item = ComponentId>, T: Component> Iterator for Iter<'a, I, T> {
+    type Item = (ComponentId, Ref<'a, T>);
 
-    fn next(&mut self) -> Option<Ref<'a, T>> {
-        Some(self.parent.borrow_by_id(self.iter.next()?).unwrap())
+    fn next(&mut self) -> Option<Self::Item> {
+        let id = self.iter.next()?;
+        Some((id, self.parent.borrow_by_id(id).unwrap()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -434,27 +630,28 @@ impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for Iter<'a, I, T
     }
 }
 
-pub struct IterMut<'a, I: Iterator<Item=ComponentId>, T: Component> {
+pub struct IterMut<'a, I: Iterator<Item = ComponentId>, T: Component> {
     iter: I,
     parent: &'a Ecs,
-    p: PhantomData<T>
+    p: PhantomData<T>,
 }
 
-impl<'a, I: Iterator<Item=ComponentId>, T: Component> IterMut<'a, I, T> {
+impl<'a, I: Iterator<Item = ComponentId>, T: Component> IterMut<'a, I, T> {
     fn new(iter: I, parent: &'a Ecs) -> Self {
         IterMut {
             iter,
             parent,
-            p: PhantomData
+            p: PhantomData,
         }
     }
 }
 
-impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for IterMut<'a, I, T> {
-    type Item = RefMut<'a, T>;
+impl<'a, I: Iterator<Item = ComponentId>, T: Component> Iterator for IterMut<'a, I, T> {
+    type Item = (ComponentId, RefMut<'a, T>);
 
-    fn next(&mut self) -> Option<RefMut<'a, T>> {
-        Some(self.parent.borrow_mut_by_id(self.iter.next()?).unwrap())
+    fn next(&mut self) -> Option<Self::Item> {
+        let id = self.iter.next()?;
+        Some((id, self.parent.borrow_mut_by_id(id).unwrap()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -464,7 +661,7 @@ impl<'a, I: Iterator<Item=ComponentId>, T: Component> Iterator for IterMut<'a, I
 
 pub struct Ref<'a, T: 'static> {
     data: cell::Ref<'a, Box<Any>>,
-    p: PhantomData<T>
+    p: PhantomData<T>,
 }
 
 impl<'a, T: 'static> Ref<'a, T> {
@@ -472,7 +669,7 @@ impl<'a, T: 'static> Ref<'a, T> {
         if (*data).downcast_ref::<T>().is_some() {
             Some(Ref {
                 data,
-                p: PhantomData
+                p: PhantomData,
             })
         } else {
             None
@@ -491,7 +688,7 @@ impl<'a, T: 'static> Deref for Ref<'a, T> {
 
 pub struct RefMut<'a, T: 'static> {
     data: cell::RefMut<'a, Box<Any>>,
-    p: PhantomData<T>
+    p: PhantomData<T>,
 }
 
 impl<'a, T: 'static> RefMut<'a, T> {
@@ -499,7 +696,7 @@ impl<'a, T: 'static> RefMut<'a, T> {
         if (*data).downcast_ref::<T>().is_some() {
             Some(RefMut {
                 data,
-                p: PhantomData
+                p: PhantomData,
             })
         } else {
             None
@@ -579,7 +776,10 @@ mod test {
         assert!(id == new_id, "Ecs::set changed the id of a component!");
 
         let new_value: Position = ecs.get(a).unwrap();
-        assert!(new_value == Position(Vector2::new(1.0, 1.0)), "Ecs::set didn't update the component.");
+        assert!(
+            new_value == Position(Vector2::new(1.0, 1.0)),
+            "Ecs::set didn't update the component."
+        );
     }
 
     #[test]
@@ -601,7 +801,7 @@ mod test {
         let id = ecs.set(a, Position(Vector2::new(0.0, 0.0))).unwrap();
         let borrow = ecs.borrow::<Position>(a).unwrap();
         let error = ecs.replace(a, Position(Vector2::new(1.0, 1.0)));
-        
+
         assert!(error.is_err());
         println!("{:?}", *borrow);
     }
